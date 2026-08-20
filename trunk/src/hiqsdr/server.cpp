@@ -132,13 +132,19 @@ int main(int argc, char* argv[]) {
     } else {
         cout << "Press q <ENTER> to exit." << endl;
         init_receivers (&cfg);
+        if (start_tx_iq_thread() != 0) {
+            hiqsdr_deinit();
+            return 255;
+        }
         create_listener_thread();
 
         char ch;
         while((ch = getc(stdin)) != EOF) {
             if (ch == 'q') break;
         }
+        stop_tx_iq_thread();
+        hiqsdr_set_ptt(0);
+        hiqsdr_deinit();
         return 0;
     }
 }
-

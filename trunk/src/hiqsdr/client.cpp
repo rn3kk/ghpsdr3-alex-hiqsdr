@@ -35,6 +35,9 @@
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <stdint.h>
+#include <atomic>
 #include <string>     // c++ std strings
 
 #include "hiqsdr.h"
@@ -51,6 +54,174 @@ static int counter = 0;
 #define SCALE_FACTOR_1   1.0
 
 #define ADC_CLIP 0x01
+
+#define TX_DATA_PORT 48249
+#define TX_PACKET_SAMPLES 600
+#define TX_PACKET_BYTES (sizeof(int16_t) * (TX_PACKET_SAMPLES + 1))
+
+static pthread_t tx_iq_thread_id;
+static int tx_iq_thread_started = 0;
+static std::atomic<bool> tx_iq_thread_run(false);
+static int tx_iq_socket = -1;
+static int tx_data_socket = -1;
+
+static int16_t float_to_i16 (float sample)
+{
+    if (sample >= 1.0F) {
+        return INT16_MAX;
+    }
+    if (sample <= -1.0F) {
+        return INT16_MIN;
+    }
+    return (int16_t)(sample * 32767.0F);
+}
+
+static void* tx_iq_thread (void*)
+{
+    float tx_iq_buffer[BUFFER_SIZE * 2];
+    int16_t tx_samples[BUFFER_SIZE * 2];
+    int tx_samples_count = 0;
+    unsigned long long sequence = 0;
+    int frame_offset = 0;
+
+    while (tx_iq_thread_run.load()) {
+        BUFFER buffer;
+        ssize_t bytes_read = recvfrom(tx_iq_socket, &buffer, sizeof(buffer), 0, NULL, NULL);
+
+        if (bytes_read < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                continue;
+            }
+            perror("recvfrom failed for TX IQ buffer");
+            break;
+        }
+
+        if (bytes_read < (ssize_t)(sizeof(buffer.sequence) + sizeof(buffer.offset) + sizeof(buffer.length)) ||
+            buffer.length > sizeof(buffer.data) ||
+            buffer.offset + buffer.length > sizeof(tx_iq_buffer)) {
+            fprintf(stderr, "Invalid TX IQ packet\n");
+            frame_offset = 0;
+            continue;
+        }
+
+        if (buffer.offset == 0) {
+            sequence = buffer.sequence;
+            frame_offset = 0;
+        }
+
+        if (buffer.sequence != sequence || buffer.offset != frame_offset) {
+            fprintf(stderr, "Missing TX IQ packet\n");
+            frame_offset = 0;
+            continue;
+        }
+
+        memcpy((unsigned char*)tx_iq_buffer + buffer.offset, buffer.data, buffer.length);
+        frame_offset += buffer.length;
+
+        if (frame_offset != (int)sizeof(tx_iq_buffer)) {
+            continue;
+        }
+
+        const float* input = tx_iq_buffer;
+        for (int i = 0; i < BUFFER_SIZE; i += 2) {
+            tx_samples[tx_samples_count++] = float_to_i16(input[BUFFER_SIZE + i]);
+            tx_samples[tx_samples_count++] = float_to_i16(input[i]);
+        }
+
+        while (tx_samples_count >= TX_PACKET_SAMPLES) {
+            int16_t packet[TX_PACKET_SAMPLES + 1] = { 0 };
+            memcpy(packet + 1, tx_samples, TX_PACKET_SAMPLES * sizeof(int16_t));
+            if (sendto(tx_data_socket, packet, TX_PACKET_BYTES, 0, NULL, 0) != TX_PACKET_BYTES) {
+                perror("sendto failed for TX IQ data");
+                tx_iq_thread_run.store(false);
+                break;
+            }
+            tx_samples_count -= TX_PACKET_SAMPLES;
+            memmove(tx_samples, tx_samples + TX_PACKET_SAMPLES, tx_samples_count * sizeof(int16_t));
+        }
+
+        frame_offset = 0;
+    }
+
+    return NULL;
+}
+
+int start_tx_iq_thread (void)
+{
+    struct sockaddr_in address;
+    struct timeval timeout;
+
+    tx_data_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (tx_data_socket < 0) {
+        perror("create socket failed for TX data");
+        return -1;
+    }
+
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(TX_DATA_PORT);
+    if (inet_pton(AF_INET, hiqsdr_get_ip_address(), &address.sin_addr) != 1 ||
+        connect(tx_data_socket, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        perror("connect failed for TX data");
+        close(tx_data_socket);
+        tx_data_socket = -1;
+        return -1;
+    }
+
+    tx_iq_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (tx_iq_socket < 0) {
+        perror("create socket failed for TX IQ");
+        close(tx_data_socket);
+        tx_data_socket = -1;
+        return -1;
+    }
+
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_port = htons(AUDIO_PORT);
+    if (bind(tx_iq_socket, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        perror("bind failed for TX IQ");
+        close(tx_iq_socket);
+        close(tx_data_socket);
+        tx_iq_socket = -1;
+        tx_data_socket = -1;
+        return -1;
+    }
+
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(tx_iq_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    tx_iq_thread_run.store(true);
+    if (pthread_create(&tx_iq_thread_id, NULL, tx_iq_thread, NULL) != 0) {
+        perror("pthread_create failed for TX IQ");
+        tx_iq_thread_run.store(false);
+        close(tx_iq_socket);
+        close(tx_data_socket);
+        tx_iq_socket = -1;
+        tx_data_socket = -1;
+        return -1;
+    }
+
+    tx_iq_thread_started = 1;
+    return 0;
+}
+
+void stop_tx_iq_thread (void)
+{
+    if (!tx_iq_thread_started) {
+        return;
+    }
+
+    tx_iq_thread_run.store(false);
+    pthread_join(tx_iq_thread_id, NULL);
+    close(tx_iq_socket);
+    close(tx_data_socket);
+    tx_iq_socket = -1;
+    tx_data_socket = -1;
+    tx_iq_thread_started = 0;
+}
 
 
 int user_data_callback(void *buf, int buf_size, void *extra)
@@ -254,6 +425,14 @@ const char* parse_command(CLIENT* client,char* command) {
             } else {
                 return INVALID_COMMAND;
             }
+        } else if(strcmp(token,"mox")==0) {
+            token=strtok(NULL," \r\n");
+            if(token!=NULL) {
+                if(strcmp(token,"0")==0 || strcmp(token,"1")==0) {
+                    return hiqsdr_set_ptt(atoi(token)) == 0 ? OK : INVALID_COMMAND;
+                }
+            }
+            return INVALID_COMMAND;
         } else if(strcmp(token,"start")==0) {
             token=strtok(NULL," \r\n");
             if(token!=NULL) {
@@ -425,4 +604,3 @@ const char* parse_command(CLIENT* client,char* command) {
     }
     return INVALID_COMMAND;
 }
-

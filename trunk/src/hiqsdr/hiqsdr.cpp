@@ -72,6 +72,7 @@ struct Hiqsdr {
     unsigned int  preSel; // Holds filter number
 	std::vector<PreselItem> preInfo; //Holds presel filters table
     int  preamp;
+    int  ptt;
 
     // asynch thread for receiving data from hardware
     pthread_t      thread_id;
@@ -109,6 +110,7 @@ int hiqsdr_init (const char*hiqsdr_ip, int hiqsdr_bw, long long hiqsdr_f)
    hq.antSel = 0;
    hq.preSel = 0;
    hq.preamp = 0;
+   hq.ptt = 0;
    hq.Xfilters = false;
    hq.rx_data_port = 48247;
    hq.ctrl_port    = hq.rx_data_port+1;   
@@ -203,6 +205,25 @@ int hiqsdr_disconnect ()
     int rc = send_deactivation (&hq);
 
     return rc;
+}
+
+int hiqsdr_set_ptt (int enabled)
+{
+    int rc;
+
+    hq.ptt = enabled ? 1 : 0;
+    if (hq.ptt) {
+        rc = send_deactivation (&hq);
+    } else {
+        rc = send_activation (&hq);
+    }
+
+    if (rc < 0) {
+        return rc;
+    }
+
+    rc = send_command (&hq);
+    return rc < 0 ? rc : 0;
 }
 
 char *hiqsdr_get_ip_address ()
@@ -748,11 +769,14 @@ static int send_command (struct Hiqsdr *hiq) {
     m.rxf_l = compute_phase (hiq->freq);
     m.txf_l = compute_phase (hiq->freq);
 
-    m.txl = 0;    //Tx output level 0 to 255
+    m.txl = hq.ptt ? 200 : 0;
 
     m.txc = 0x02  //   all other operation (e.g. SSB)
           | 0x04  //   use the HiQSDR extended IO pins (from FPGA version 1.1 on)
     ;
+    if (hq.ptt) {
+        m.txc |= 0x08;  // software key/PTT
+    }
     m.rxc = get_decimation(hiq->bw) - 1;
 
     m.fwv = 3;  // FPGA firmware version
@@ -1088,7 +1112,6 @@ int main (int argc, const char** argv)
 
 
 #endif
-
 
 
 

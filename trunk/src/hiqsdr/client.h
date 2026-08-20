@@ -51,4 +51,5 @@ typedef struct _client {
 
 
 void* client_thread(void* arg);
-
+int start_tx_iq_thread (void);
+void stop_tx_iq_thread (void);
