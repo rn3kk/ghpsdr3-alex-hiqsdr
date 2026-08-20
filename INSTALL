@@ -1,370 +1,338 @@
-Installation Instructions
-*************************
+Инструкции по установке
+***********************
 
 Copyright (C) 1994-1996, 1999-2002, 2004-2013 Free Software Foundation,
 Inc.
 
-   Copying and distribution of this file, with or without modification,
-are permitted in any medium without royalty provided the copyright
-notice and this notice are preserved.  This file is offered as-is,
-without warranty of any kind.
+   Копирование и распространение этого файла, с изменениями или без них,
+разрешены на любом носителе без выплаты вознаграждения при сохранении
+уведомления об авторских правах и этого уведомления. Файл предоставляется
+«как есть», без каких-либо гарантий.
 
-Basic Installation
-==================
+Базовая установка
+=================
 
-   Briefly, the shell command `./configure && make && make install'
-should configure, build, and install this package.  The following
-more-detailed instructions are generic; see the `README' file for
-instructions specific to this package.  Some packages provide this
-`INSTALL' file but do not implement all of the features documented
-below.  The lack of an optional feature in a given package is not
-necessarily a bug.  More recommendations for GNU packages can be found
-in *note Makefile Conventions: (standards)Makefile Conventions.
+   Вкратце, команда оболочки `./configure && make && make install'
+должна настроить, собрать и установить пакет. Приведённые ниже более
+подробные инструкции являются общими; особые инструкции для этого пакета
+смотрите в файле `README'. Некоторые пакеты содержат этот файл `INSTALL',
+но не реализуют все описанные ниже возможности. Отсутствие необязательной
+возможности в конкретном пакете не обязательно является ошибкой. Больше
+рекомендаций для пакетов GNU приведено в *note Makefile Conventions:
+(standards)Makefile Conventions.
 
-   The `configure' shell script attempts to guess correct values for
-various system-dependent variables used during compilation.  It uses
-those values to create a `Makefile' in each directory of the package.
-It may also create one or more `.h' files containing system-dependent
-definitions.  Finally, it creates a shell script `config.status' that
-you can run in the future to recreate the current configuration, and a
-file `config.log' containing compiler output (useful mainly for
-debugging `configure').
+   Сценарий оболочки `configure' пытается определить правильные значения
+различных системно-зависимых переменных, используемых при компиляции. Он
+использует эти значения для создания `Makefile' в каждом каталоге пакета.
+Также он может создать один или несколько файлов `.h' с системно-зависимыми
+определениями. Наконец, он создаёт сценарий `config.status', которым в
+будущем можно восстановить текущую конфигурацию, и файл `config.log' с
+выводом компилятора (главным образом полезный при отладке `configure').
 
-   It can also use an optional file (typically called `config.cache'
-and enabled with `--cache-file=config.cache' or simply `-C') that saves
-the results of its tests to speed up reconfiguring.  Caching is
-disabled by default to prevent problems with accidental use of stale
-cache files.
+   Он также может использовать необязательный файл (обычно называемый
+`config.cache', включается параметром `--cache-file=config.cache' или
+просто `-C'), сохраняющий результаты проверок для ускорения повторной
+настройки. По умолчанию кэширование отключено, чтобы избежать проблем со
+случайным использованием устаревшего кэша.
 
-   If you need to do unusual things to compile the package, please try
-to figure out how `configure' could check whether to do them, and mail
-diffs or instructions to the address given in the `README' so they can
-be considered for the next release.  If you are using the cache, and at
-some point `config.cache' contains results you don't want to keep, you
-may remove or edit it.
+   Если для компиляции пакета требуется что-то необычное, постарайтесь
+определить, как `configure' мог бы проверять такую необходимость, и
+отправьте diff или инструкции по адресу из `README', чтобы их могли
+рассмотреть для следующего выпуска. При использовании кэша файл
+`config.cache' с ненужными результатами можно удалить или отредактировать.
 
-   The file `configure.ac' (or `configure.in') is used to create
-`configure' by a program called `autoconf'.  You need `configure.ac' if
-you want to change it or regenerate `configure' using a newer version
-of `autoconf'.
+   Файл `configure.ac' (или `configure.in') используется программой
+`autoconf' для создания `configure'. Он нужен, если вы хотите изменить
+его или создать `configure' заново более новой версией `autoconf'.
 
-   The simplest way to compile this package is:
+   Самый простой способ собрать пакет:
 
-  1. `cd' to the directory containing the package's source code and type
-     `./configure' to configure the package for your system.
+  1. Перейдите (`cd') в каталог с исходным кодом пакета и выполните
+     `./configure', чтобы настроить пакет для вашей системы.
 
-     Running `configure' might take a while.  While running, it prints
-     some messages telling which features it is checking for.
+     Выполнение `configure' может занять некоторое время. В процессе он
+     выводит сообщения о проверяемых возможностях.
 
-  2. Type `make' to compile the package.
+  2. Выполните `make', чтобы собрать пакет.
 
-  3. Optionally, type `make check' to run any self-tests that come with
-     the package, generally using the just-built uninstalled binaries.
+  3. При необходимости выполните `make check', чтобы запустить входящие
+     в пакет самопроверки; обычно при этом используются только что
+     собранные, ещё не установленные программы.
 
-  4. Type `make install' to install the programs and any data files and
-     documentation.  When installing into a prefix owned by root, it is
-     recommended that the package be configured and built as a regular
-     user, and only the `make install' phase executed with root
-     privileges.
+  4. Выполните `make install', чтобы установить программы, файлы данных
+     и документацию. При установке в префикс, принадлежащий root,
+     рекомендуется выполнять настройку и сборку обычным пользователем,
+     а с привилегиями root запускать только этап `make install'.
 
-  5. Optionally, type `make installcheck' to repeat any self-tests, but
-     this time using the binaries in their final installed location.
-     This target does not install anything.  Running this target as a
-     regular user, particularly if the prior `make install' required
-     root privileges, verifies that the installation completed
-     correctly.
+  5. При необходимости выполните `make installcheck', чтобы повторить
+     самопроверки, но уже с программами из окончательного места установки.
+     Эта цель ничего не устанавливает. Её запуск обычным пользователем,
+     особенно если предыдущий `make install' требовал root, подтверждает
+     корректность установки.
 
-  6. You can remove the program binaries and object files from the
-     source code directory by typing `make clean'.  To also remove the
-     files that `configure' created (so you can compile the package for
-     a different kind of computer), type `make distclean'.  There is
-     also a `make maintainer-clean' target, but that is intended mainly
-     for the package's developers.  If you use it, you may have to get
-     all sorts of other programs in order to regenerate files that came
-     with the distribution.
+  6. Удалить исполняемые и объектные файлы из каталога исходного кода
+     можно командой `make clean'. Чтобы удалить и файлы, созданные
+     `configure' (например, перед сборкой для другого компьютера),
+     выполните `make distclean'. Существует также `make maintainer-clean',
+     но эта цель предназначена главным образом для разработчиков пакета.
+     После неё может потребоваться установить дополнительные программы,
+     чтобы заново создать файлы, поставляемые с дистрибутивом.
 
-  7. Often, you can also type `make uninstall' to remove the installed
-     files again.  In practice, not all packages have tested that
-     uninstallation works correctly, even though it is required by the
-     GNU Coding Standards.
+  7. Во многих случаях `make uninstall' удаляет установленные файлы.
+     На практике не все пакеты проверяли корректность удаления, хотя оно
+     требуется стандартами кодирования GNU.
 
-  8. Some packages, particularly those that use Automake, provide `make
-     distcheck', which can by used by developers to test that all other
-     targets like `make install' and `make uninstall' work correctly.
-     This target is generally not run by end users.
+  8. Некоторые пакеты, особенно использующие Automake, содержат цель
+     `make distcheck'. Разработчики могут с её помощью убедиться, что
+     другие цели, например `make install' и `make uninstall', работают
+     правильно. Обычные пользователи обычно её не запускают.
 
-Compilers and Options
-=====================
+Компиляторы и параметры
+=======================
 
-   Some systems require unusual options for compilation or linking that
-the `configure' script does not know about.  Run `./configure --help'
-for details on some of the pertinent environment variables.
+   Некоторым системам нужны необычные параметры компиляции или линковки,
+о которых сценарий `configure' не знает. Сведения о соответствующих
+переменных окружения выводит команда `./configure --help'.
 
-   You can give `configure' initial values for configuration parameters
-by setting variables in the command line or in the environment.  Here
-is an example:
+   Начальные значения параметров конфигурации можно передать `configure',
+задав переменные в командной строке или окружении. Например:
 
      ./configure CC=c99 CFLAGS=-g LIBS=-lposix
 
-   *Note Defining Variables::, for more details.
+   Подробнее: *note Defining Variables::.
 
-Compiling For Multiple Architectures
-====================================
+Сборка для нескольких архитектур
+================================
 
-   You can compile the package for more than one kind of computer at the
-same time, by placing the object files for each architecture in their
-own directory.  To do this, you can use GNU `make'.  `cd' to the
-directory where you want the object files and executables to go and run
-the `configure' script.  `configure' automatically checks for the
-source code in the directory that `configure' is in and in `..'.  This
-is known as a "VPATH" build.
+   Можно одновременно собирать пакет для нескольких типов компьютеров,
+разместив объектные файлы каждой архитектуры в отдельном каталоге. Для
+этого можно использовать GNU `make'. Перейдите (`cd') в каталог, где
+должны находиться объектные файлы и исполняемые программы, и запустите
+`configure'. Он автоматически ищет исходный код в каталоге, содержащем
+`configure', и в `..'. Это называется сборкой «VPATH».
 
-   With a non-GNU `make', it is safer to compile the package for one
-architecture at a time in the source code directory.  After you have
-installed the package for one architecture, use `make distclean' before
-reconfiguring for another architecture.
+   С `make', отличным от GNU, безопаснее собирать пакет для одной
+архитектуры за раз прямо в каталоге исходного кода. После установки для
+одной архитектуры выполните `make distclean' перед настройкой для другой.
 
-   On MacOS X 10.5 and later systems, you can create libraries and
-executables that work on multiple system types--known as "fat" or
-"universal" binaries--by specifying multiple `-arch' options to the
-compiler but only a single `-arch' option to the preprocessor.  Like
-this:
+   В MacOS X 10.5 и новее можно создавать библиотеки и исполняемые файлы,
+работающие на нескольких типах систем — так называемые «fat» или
+«universal» binary, — указав компилятору несколько параметров `-arch',
+а препроцессору только один. Например:
 
      ./configure CC="gcc -arch i386 -arch x86_64 -arch ppc -arch ppc64" \
                  CXX="g++ -arch i386 -arch x86_64 -arch ppc -arch ppc64" \
                  CPP="gcc -E" CXXCPP="g++ -E"
 
-   This is not guaranteed to produce working output in all cases, you
-may have to build one architecture at a time and combine the results
-using the `lipo' tool if you have problems.
+   Это не гарантирует рабочий результат во всех случаях. При проблемах
+может потребоваться собирать архитектуры по очереди и объединять результат
+утилитой `lipo'.
 
-Installation Names
-==================
+Имена и каталоги установки
+==========================
 
-   By default, `make install' installs the package's commands under
-`/usr/local/bin', include files under `/usr/local/include', etc.  You
-can specify an installation prefix other than `/usr/local' by giving
-`configure' the option `--prefix=PREFIX', where PREFIX must be an
-absolute file name.
+   По умолчанию `make install' устанавливает команды пакета в
+`/usr/local/bin', заголовочные файлы в `/usr/local/include' и т. д.
+Другой префикс установки вместо `/usr/local' задаётся параметром
+`--prefix=PREFIX' для `configure', где PREFIX должен быть абсолютным
+именем каталога.
 
-   You can specify separate installation prefixes for
-architecture-specific files and architecture-independent files.  If you
-pass the option `--exec-prefix=PREFIX' to `configure', the package uses
-PREFIX as the prefix for installing programs and libraries.
-Documentation and other data files still use the regular prefix.
+   Можно задать отдельные префиксы для архитектурно-зависимых и
+архитектурно-независимых файлов. Если передать `configure' параметр
+`--exec-prefix=PREFIX', PREFIX будет использоваться для установки
+программ и библиотек. Документация и прочие файлы данных по-прежнему
+используют обычный префикс.
 
-   In addition, if you use an unusual directory layout you can give
-options like `--bindir=DIR' to specify different values for particular
-kinds of files.  Run `configure --help' for a list of the directories
-you can set and what kinds of files go in them.  In general, the
-default for these options is expressed in terms of `${prefix}', so that
-specifying just `--prefix' will affect all of the other directory
-specifications that were not explicitly provided.
+   Кроме того, при нестандартной структуре каталогов можно передать
+параметры вида `--bindir=DIR', задающие расположение определённых типов
+файлов. Список доступных каталогов и типов файлов смотрите в выводе
+`configure --help'. Обычно значения по умолчанию выражаются через
+`${prefix}', поэтому один `--prefix' влияет на все явно не заданные
+каталоги.
 
-   The most portable way to affect installation locations is to pass the
-correct locations to `configure'; however, many packages provide one or
-both of the following shortcuts of passing variable assignments to the
-`make install' command line to change installation locations without
-having to reconfigure or recompile.
+   Самый переносимый способ изменить пути установки — передать правильные
+пути `configure'. Однако многие пакеты поддерживают один или оба
+следующих способа: передавать присваивания переменных в командной строке
+`make install', меняя пути без повторной настройки и компиляции.
 
-   The first method involves providing an override variable for each
-affected directory.  For example, `make install
-prefix=/alternate/directory' will choose an alternate location for all
-directory configuration variables that were expressed in terms of
-`${prefix}'.  Any directories that were specified during `configure',
-but not in terms of `${prefix}', must each be overridden at install
-time for the entire installation to be relocated.  The approach of
-makefile variable overrides for each directory variable is required by
-the GNU Coding Standards, and ideally causes no recompilation.
-However, some platforms have known limitations with the semantics of
-shared libraries that end up requiring recompilation when using this
-method, particularly noticeable in packages that use GNU Libtool.
+   Первый способ — переопределить переменную каждого нужного каталога.
+Например, `make install prefix=/alternate/directory' выберет другое
+расположение для всех переменных каталогов, выраженных через `${prefix}'.
+Каталоги, заданные при `configure' не через `${prefix}', нужно отдельно
+переопределить при установке, чтобы перенести всю установку. Такой способ
+требуется стандартами кодирования GNU и в идеале не вызывает пересборку.
+Но на некоторых платформах особенности разделяемых библиотек требуют
+пересборки, особенно в пакетах с GNU Libtool.
 
-   The second method involves providing the `DESTDIR' variable.  For
-example, `make install DESTDIR=/alternate/directory' will prepend
-`/alternate/directory' before all installation names.  The approach of
-`DESTDIR' overrides is not required by the GNU Coding Standards, and
-does not work on platforms that have drive letters.  On the other hand,
-it does better at avoiding recompilation issues, and works well even
-when some directory options were not specified in terms of `${prefix}'
-at `configure' time.
+   Второй способ — передать переменную `DESTDIR'. Например, `make install
+DESTDIR=/alternate/directory' добавит `/alternate/directory' перед всеми
+именами установки. Переопределение `DESTDIR' не требуется стандартами GNU
+и не работает на платформах с буквами дисков. Зато оно лучше избегает
+проблем с пересборкой и работает, даже если часть каталогов не была
+задана через `${prefix}' во время `configure'.
 
-Optional Features
-=================
+Необязательные возможности
+==========================
 
-   If the package supports it, you can cause programs to be installed
-with an extra prefix or suffix on their names by giving `configure' the
-option `--program-prefix=PREFIX' or `--program-suffix=SUFFIX'.
+   Если пакет это поддерживает, дополнительный префикс или суффикс в
+именах устанавливаемых программ задаётся параметрами `--program-prefix=PREFIX'
+или `--program-suffix=SUFFIX' для `configure'.
 
-   Some packages pay attention to `--enable-FEATURE' options to
-`configure', where FEATURE indicates an optional part of the package.
-They may also pay attention to `--with-PACKAGE' options, where PACKAGE
-is something like `gnu-as' or `x' (for the X Window System).  The
-`README' should mention any `--enable-' and `--with-' options that the
-package recognizes.
+   Некоторые пакеты распознают параметры `--enable-FEATURE' для
+`configure', где FEATURE обозначает необязательную часть пакета. Они
+также могут принимать `--with-PACKAGE', где PACKAGE — например `gnu-as'
+или `x' (для X Window System). В `README' должны быть перечислены
+распознаваемые пакетом параметры `--enable-' и `--with-'.
 
-   For packages that use the X Window System, `configure' can usually
-find the X include and library files automatically, but if it doesn't,
-you can use the `configure' options `--x-includes=DIR' and
-`--x-libraries=DIR' to specify their locations.
+   В пакетах с X Window System `configure' обычно сам находит заголовки и
+библиотеки X. Если этого не произошло, укажите их расположение параметрами
+`--x-includes=DIR' и `--x-libraries=DIR'.
 
-   Some packages offer the ability to configure how verbose the
-execution of `make' will be.  For these packages, running `./configure
---enable-silent-rules' sets the default to minimal output, which can be
-overridden with `make V=1'; while running `./configure
---disable-silent-rules' sets the default to verbose, which can be
-overridden with `make V=0'.
+   Некоторые пакеты позволяют настроить подробность вывода `make'. Для
+таких пакетов `./configure --enable-silent-rules' включает минимальный
+вывод по умолчанию, который отменяется `make V=1'; а команда `./configure
+--disable-silent-rules' включает подробный вывод, отменяемый `make V=0'.
 
-Particular systems
-==================
+Особые системы
+==============
 
-   On HP-UX, the default C compiler is not ANSI C compatible.  If GNU
-CC is not installed, it is recommended to use the following options in
-order to use an ANSI C compiler:
+   В HP-UX компилятор C по умолчанию несовместим с ANSI C. Если GNU CC не
+установлен, для использования ANSI C рекомендуется:
 
      ./configure CC="cc -Ae -D_XOPEN_SOURCE=500"
 
-and if that doesn't work, install pre-built binaries of GCC for HP-UX.
+Если это не помогает, установите готовые двоичные файлы GCC для HP-UX.
 
-   HP-UX `make' updates targets which have the same time stamps as
-their prerequisites, which makes it generally unusable when shipped
-generated files such as `configure' are involved.  Use GNU `make'
-instead.
+   `make' из HP-UX обновляет цели с теми же временными метками, что и их
+зависимости. Поэтому он в целом непригоден для пакетов с поставляемыми
+сгенерированными файлами, такими как `configure'. Используйте GNU `make'.
 
-   On OSF/1 a.k.a. Tru64, some versions of the default C compiler cannot
-parse its `<wchar.h>' header file.  The option `-nodtk' can be used as
-a workaround.  If GNU CC is not installed, it is therefore recommended
-to try
+   В OSF/1 (Tru64) некоторые версии штатного компилятора C не могут
+разобрать собственный заголовок `<wchar.h>'. Обходной путь — параметр
+`-nodtk'. Если GNU CC не установлен, сначала рекомендуется выполнить:
 
      ./configure CC="cc"
 
-and if that doesn't work, try
+а если это не сработает:
 
      ./configure CC="cc -nodtk"
 
-   On Solaris, don't put `/usr/ucb' early in your `PATH'.  This
-directory contains several dysfunctional programs; working variants of
-these programs are available in `/usr/bin'.  So, if you need `/usr/ucb'
-in your `PATH', put it _after_ `/usr/bin'.
+   В Solaris не ставьте `/usr/ucb' в начало `PATH'. В этом каталоге есть
+несколько некорректно работающих программ; исправные варианты находятся в
+`/usr/bin'. Если `/usr/ucb' нужен в `PATH', помещайте его _после_ `/usr/bin'.
 
-   On Haiku, software installed for all users goes in `/boot/common',
-not `/usr/local'.  It is recommended to use the following options:
+   В Haiku программное обеспечение для всех пользователей устанавливается
+в `/boot/common', а не в `/usr/local'. Рекомендуются параметры:
 
      ./configure --prefix=/boot/common
 
-Specifying the System Type
-==========================
+Указание типа системы
+=====================
 
-   There may be some features `configure' cannot figure out
-automatically, but needs to determine by the type of machine the package
-will run on.  Usually, assuming the package is built to be run on the
-_same_ architectures, `configure' can figure that out, but if it prints
-a message saying it cannot guess the machine type, give it the
-`--build=TYPE' option.  TYPE can either be a short name for the system
-type, such as `sun4', or a canonical name which has the form:
+   Некоторые возможности `configure' не может определить автоматически:
+ему нужно знать тип машины, на которой будет работать пакет. Обычно при
+сборке для той же архитектуры `configure' определяет его сам. Но если он
+сообщает, что не может угадать тип машины, передайте `--build=TYPE'. TYPE
+может быть кратким именем типа системы, например `sun4', или каноническим
+именем вида:
 
      CPU-COMPANY-SYSTEM
 
-where SYSTEM can have one of these forms:
+где SYSTEM имеет одну из форм:
 
      OS
      KERNEL-OS
 
-   See the file `config.sub' for the possible values of each field.  If
-`config.sub' isn't included in this package, then this package doesn't
-need to know the machine type.
+   Допустимые значения каждого поля смотрите в `config.sub'. Если этот
+файл не входит в пакет, пакету не требуется знать тип машины.
 
-   If you are _building_ compiler tools for cross-compiling, you should
-use the option `--target=TYPE' to select the type of system they will
-produce code for.
+   Если вы _собираете_ инструменты-компиляторы для кросс-компиляции,
+используйте `--target=TYPE', чтобы выбрать тип системы, для которой они
+будут генерировать код.
 
-   If you want to _use_ a cross compiler, that generates code for a
-platform different from the build platform, you should specify the
-"host" platform (i.e., that on which the generated programs will
-eventually be run) with `--host=TYPE'.
+   Если вы хотите _использовать_ кросс-компилятор, генерирующий код для
+платформы, отличной от платформы сборки, укажите «host»-платформу (то есть
+платформу, на которой в итоге будут запущены созданные программы) через
+`--host=TYPE'.
 
-Sharing Defaults
-================
+Общие настройки по умолчанию
+============================
 
-   If you want to set default values for `configure' scripts to share,
-you can create a site shell script called `config.site' that gives
-default values for variables like `CC', `cache_file', and `prefix'.
-`configure' looks for `PREFIX/share/config.site' if it exists, then
-`PREFIX/etc/config.site' if it exists.  Or, you can set the
-`CONFIG_SITE' environment variable to the location of the site script.
-A warning: not all `configure' scripts look for a site script.
+   Чтобы задать общие значения по умолчанию для сценариев `configure',
+создайте сценарий сайта `config.site', в котором определите переменные
+вроде `CC', `cache_file' и `prefix'. `configure' ищет
+`PREFIX/share/config.site', если файл существует, затем
+`PREFIX/etc/config.site'. Также можно указать расположение сценария сайта
+переменной окружения `CONFIG_SITE'. Предупреждение: не каждый `configure'
+ищет такой сценарий.
 
-Defining Variables
-==================
+Определение переменных
+======================
 
-   Variables not defined in a site shell script can be set in the
-environment passed to `configure'.  However, some packages may run
-configure again during the build, and the customized values of these
-variables may be lost.  In order to avoid this problem, you should set
-them in the `configure' command line, using `VAR=value'.  For example:
+   Переменные, не определённые в сценарии сайта, можно задать в окружении,
+передаваемом `configure'. Однако некоторые пакеты повторно запускают
+configure во время сборки, и заданные значения могут быть потеряны. Чтобы
+этого избежать, задавайте их в командной строке `configure' как `VAR=value'.
+Например:
 
      ./configure CC=/usr/local2/bin/gcc
 
-causes the specified `gcc' to be used as the C compiler (unless it is
-overridden in the site shell script).
+выбирает указанный `gcc' в качестве компилятора C (если сценарий сайта не
+переопределяет это значение).
 
-Unfortunately, this technique does not work for `CONFIG_SHELL' due to
-an Autoconf limitation.  Until the limitation is lifted, you can use
-this workaround:
+К сожалению, из-за ограничения Autoconf этот способ не работает для
+`CONFIG_SHELL'. Пока ограничение не устранено, используйте обходной путь:
 
      CONFIG_SHELL=/bin/bash ./configure CONFIG_SHELL=/bin/bash
 
-`configure' Invocation
-======================
+Запуск `configure'
+===================
 
-   `configure' recognizes the following options to control how it
-operates.
+   `configure' распознаёт следующие параметры, управляющие его работой.
 
 `--help'
 `-h'
-     Print a summary of all of the options to `configure', and exit.
+     Вывести сводку всех параметров `configure' и завершить работу.
 
 `--help=short'
 `--help=recursive'
-     Print a summary of the options unique to this package's
-     `configure', and exit.  The `short' variant lists options used
-     only in the top level, while the `recursive' variant lists options
-     also present in any nested packages.
+     Вывести сводку параметров, уникальных для `configure' этого пакета,
+     и завершить работу. Вариант `short' перечисляет параметры только
+     верхнего уровня, а `recursive' также параметры вложенных пакетов.
 
 `--version'
 `-V'
-     Print the version of Autoconf used to generate the `configure'
-     script, and exit.
+     Вывести версию Autoconf, которой был создан сценарий `configure',
+     и завершить работу.
 
 `--cache-file=FILE'
-     Enable the cache: use and save the results of the tests in FILE,
-     traditionally `config.cache'.  FILE defaults to `/dev/null' to
-     disable caching.
+     Включить кэш: использовать и сохранять результаты проверок в FILE,
+     традиционно `config.cache'. FILE по умолчанию равен `/dev/null',
+     что отключает кэширование.
 
 `--config-cache'
 `-C'
-     Alias for `--cache-file=config.cache'.
+     Псевдоним для `--cache-file=config.cache'.
 
 `--quiet'
 `--silent'
 `-q'
-     Do not print messages saying which checks are being made.  To
-     suppress all normal output, redirect it to `/dev/null' (any error
-     messages will still be shown).
+     Не выводить сообщения о выполняемых проверках. Чтобы подавить весь
+     обычный вывод, перенаправьте его в `/dev/null' (сообщения об ошибках
+     всё равно будут показаны).
 
 `--srcdir=DIR'
-     Look for the package's source code in directory DIR.  Usually
-     `configure' can determine that directory automatically.
+     Искать исходный код пакета в каталоге DIR. Обычно `configure' может
+     определить этот каталог автоматически.
 
 `--prefix=DIR'
-     Use DIR as the installation prefix.  *note Installation Names::
-     for more details, including other options available for fine-tuning
-     the installation locations.
+     Использовать DIR в качестве префикса установки. Подробнее, включая
+     другие параметры точной настройки путей: *note Installation Names::.
 
 `--no-create'
 `-n'
-     Run the configure checks, but stop before creating any output
-     files.
+     Выполнить проверки конфигурации, но остановиться до создания файлов
+     вывода.
 
-`configure' also accepts some other, not widely useful, options.  Run
-`configure --help' for more details.
+   `configure' принимает и другие, редко полезные параметры. Подробнее:
+`configure --help'.
