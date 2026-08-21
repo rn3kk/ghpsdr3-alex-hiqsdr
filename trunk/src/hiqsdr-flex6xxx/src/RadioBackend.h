@@ -13,6 +13,7 @@ class RadioBackend : public QObject
 public:
     explicit RadioBackend(QObject* parent = nullptr);
 
+    virtual bool start() = 0;
     virtual bool setSliceFrequencyMhz(double frequencyMhz) = 0;
     virtual double sliceFrequencyMhz() const = 0;
     virtual bool setFilter(int lowHz, int highHz) = 0;

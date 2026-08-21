@@ -1,14 +1,14 @@
 #pragma once
 
 #include "RadioBackend.h"
-#include "TestSignalProcessor.h"
 
-class TestRadioBackend : public RadioBackend
+class HiqSdrBackend : public RadioBackend
 {
     Q_OBJECT
 
 public:
-    explicit TestRadioBackend(QObject* parent = nullptr);
+    explicit HiqSdrBackend(const QString& deviceAddress, QObject* parent = nullptr);
+    ~HiqSdrBackend() override;
 
     bool start() override;
     bool setSliceFrequencyMhz(double frequencyMhz) override;
@@ -32,7 +32,12 @@ public:
     float filterLevelDbm() const override;
 
 private:
-    TestSignalProcessor m_signalProcessor;
+    bool sendInitialControlState();
+    int preselectorForFrequency(double frequencyMhz) const;
+
+    class HiqSdrDevice* m_device;
+    QString m_deviceAddress;
+    bool m_started{false};
     double m_sliceFrequencyMhz{14.100000};
     int m_filterLowHz{100};
     int m_filterHighHz{2900};
@@ -41,4 +46,5 @@ private:
     int m_attenuatorDb{0};
     int m_audioLevel{50};
     bool m_audioMuted{false};
+    quint32 m_frameIndex{0};
 };

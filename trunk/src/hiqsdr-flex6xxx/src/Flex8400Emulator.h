@@ -15,7 +15,8 @@ class Flex8400Emulator : public QObject
     Q_OBJECT
 
 public:
-    explicit Flex8400Emulator(QObject* parent = nullptr);
+    explicit Flex8400Emulator(const QString& hiqSdrAddress = QString(),
+                              QObject* parent = nullptr);
 
     bool start(const QHostAddress& address, quint16 port);
 

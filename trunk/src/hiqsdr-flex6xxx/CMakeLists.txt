@@ -16,6 +16,10 @@ qt_add_executable(hiqsdr-flex6xxx
     src/Flex8400Emulator.h
     src/FlexControlServer.cpp
     src/FlexControlServer.h
+    src/HiqSdrBackend.cpp
+    src/HiqSdrBackend.h
+    src/hiqsdr/HiqSdrDevice.cpp
+    src/hiqsdr/HiqSdrDevice.h
     src/RadioBackend.cpp
     src/RadioBackend.h
     src/RadioTypes.h

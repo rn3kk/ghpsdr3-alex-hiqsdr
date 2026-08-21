@@ -3,6 +3,7 @@
 #include <QTimer>
 
 #include "FlexControlServer.h"
+#include "HiqSdrBackend.h"
 #include "RadioBackend.h"
 #include "TestRadioBackend.h"
 #include "VitaPacketBuilder.h"
@@ -14,9 +15,11 @@ constexpr int kAudioIntervalMs = 20;
 constexpr int kAudioFramesPerPacket = 480;
 }
 
-Flex8400Emulator::Flex8400Emulator(QObject* parent)
+Flex8400Emulator::Flex8400Emulator(const QString& hiqSdrAddress, QObject* parent)
     : QObject(parent),
-      m_radioBackend(new TestRadioBackend(this)),
+      m_radioBackend(hiqSdrAddress.isEmpty()
+          ? static_cast<RadioBackend*>(new TestRadioBackend(this))
+          : static_cast<RadioBackend*>(new HiqSdrBackend(hiqSdrAddress, this))),
       m_controlServer(new FlexControlServer(m_radioBackend, this)),
       m_udpStreamer(new VitaUdpStreamer(this)),
       m_spectrumTimer(new QTimer(this)),
@@ -32,6 +35,9 @@ Flex8400Emulator::Flex8400Emulator(QObject* parent)
 
 bool Flex8400Emulator::start(const QHostAddress& address, quint16 port)
 {
+    if (!m_radioBackend->start()) {
+        return false;
+    }
     if (!m_controlServer->start(address, port)) {
         return false;
     }

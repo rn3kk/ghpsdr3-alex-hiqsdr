@@ -20,6 +20,9 @@ int main(int argc, char* argv[])
                       QStringLiteral("SmartSDR TCP port."),
                       QStringLiteral("port"),
                       QStringLiteral("4992")});
+    parser.addOption({QStringLiteral("hiqsdr-ip"),
+                      QStringLiteral("HiQSDR address. Enables hardware control without IQ streaming."),
+                      QStringLiteral("address")});
     parser.process(application);
 
     bool portIsValid = false;
@@ -29,7 +32,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    Flex8400Emulator emulator;
+    Flex8400Emulator emulator(parser.value(QStringLiteral("hiqsdr-ip")));
     if (!emulator.start(address, port)) {
         return 1;
     }

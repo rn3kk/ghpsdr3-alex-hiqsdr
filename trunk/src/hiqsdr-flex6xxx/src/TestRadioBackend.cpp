@@ -5,6 +5,11 @@ TestRadioBackend::TestRadioBackend(QObject* parent)
 {
 }
 
+bool TestRadioBackend::start()
+{
+    return true;
+}
+
 bool TestRadioBackend::setSliceFrequencyMhz(double frequencyMhz)
 {
     if (frequencyMhz <= 0.0) {
