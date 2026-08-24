@@ -24,6 +24,34 @@ double TestRadioBackend::sliceFrequencyMhz() const
     return m_sliceFrequencyMhz;
 }
 
+bool TestRadioBackend::setPanCenterFrequencyMhz(double frequencyMhz)
+{
+    if (frequencyMhz <= 0.0) {
+        return false;
+    }
+    m_panCenterFrequencyMhz = frequencyMhz;
+    return true;
+}
+
+double TestRadioBackend::panCenterFrequencyMhz() const
+{
+    return m_panCenterFrequencyMhz;
+}
+
+bool TestRadioBackend::setPanBandwidthHz(int bandwidthHz)
+{
+    if (bandwidthHz <= 0) {
+        return false;
+    }
+    m_panBandwidthHz = bandwidthHz;
+    return true;
+}
+
+int TestRadioBackend::panBandwidthHz() const
+{
+    return m_panBandwidthHz;
+}
+
 bool TestRadioBackend::setFilter(int lowHz, int highHz)
 {
     if (lowHz >= highHz) {

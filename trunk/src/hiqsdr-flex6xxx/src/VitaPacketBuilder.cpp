@@ -19,6 +19,7 @@ constexpr quint32 kWaterfallClass = 0x534C8004;
 constexpr quint32 kNarrowAudioClass = 0x534C03E3;
 constexpr quint32 kMeterClass = 0x534C8002;
 constexpr quint32 kMeterStreamId = 0x46000000;
+constexpr int kIpv4AndUdpHeaderBytes = 28;
 
 quint32 packetWord(quint8 sequence, quint16 words)
 {
@@ -37,65 +38,82 @@ void writeHeader(uchar* data, quint32 word0, quint32 streamId, quint32 classCode
 }
 }
 
-QByteArray VitaPacketBuilder::createSpectrumPacket(const SpectrumFrame& frame)
+void VitaPacketBuilder::setNetworkMtu(int mtu)
+{
+    m_networkMtu = mtu;
+}
+
+QList<QByteArray> VitaPacketBuilder::createSpectrumPackets(const SpectrumFrame& frame)
 {
     constexpr int headerBytes = 28;
     constexpr int subheaderBytes = 12;
-    const int packetBytes = headerBytes + subheaderBytes + frame.pixels.size() * 2;
-    QByteArray packet(packetBytes, Qt::Uninitialized);
-    uchar* data = reinterpret_cast<uchar*>(packet.data());
-    writeHeader(data, packetWord(m_spectrumSequence, packetBytes / 4), kPanStreamId, kFftClass);
-
-    qToBigEndian<quint16>(0, data + headerBytes);
-    qToBigEndian<quint16>(frame.pixels.size(), data + headerBytes + 2);
-    qToBigEndian<quint16>(sizeof(quint16), data + headerBytes + 4);
-    qToBigEndian<quint16>(frame.pixels.size(), data + headerBytes + 6);
-    qToBigEndian(frame.index, data + headerBytes + 8);
-    for (int index = 0; index < frame.pixels.size(); ++index) {
-        qToBigEndian(frame.pixels.at(index), data + headerBytes + subheaderBytes + index * 2);
+    const int binsPerPacket = qMax(1,
+        (m_networkMtu - kIpv4AndUdpHeaderBytes - headerBytes - subheaderBytes) / 2);
+    QList<QByteArray> packets;
+    for (int firstBin = 0; firstBin < frame.pixels.size(); firstBin += binsPerPacket) {
+        const int binCount = qMin(binsPerPacket, frame.pixels.size() - firstBin);
+        const int packetBytes = headerBytes + subheaderBytes + binCount * 2;
+        QByteArray packet(packetBytes, Qt::Uninitialized);
+        uchar* data = reinterpret_cast<uchar*>(packet.data());
+        writeHeader(data, packetWord(m_spectrumSequence, packetBytes / 4), kPanStreamId, kFftClass);
+        qToBigEndian<quint16>(firstBin, data + headerBytes);
+        qToBigEndian<quint16>(binCount, data + headerBytes + 2);
+        qToBigEndian<quint16>(sizeof(quint16), data + headerBytes + 4);
+        qToBigEndian<quint16>(frame.pixels.size(), data + headerBytes + 6);
+        qToBigEndian(frame.index, data + headerBytes + 8);
+        for (int index = 0; index < binCount; ++index) {
+            qToBigEndian(frame.pixels.at(firstBin + index),
+                          data + headerBytes + subheaderBytes + index * 2);
+        }
+        packets.append(packet);
+        m_spectrumSequence = (m_spectrumSequence + 1) & 0x0F;
     }
-
-    m_spectrumSequence = (m_spectrumSequence + 1) & 0x0F;
-    return packet;
+    return packets;
 }
 
-QByteArray VitaPacketBuilder::createWaterfallPacket(const SpectrumFrame& frame)
+QList<QByteArray> VitaPacketBuilder::createWaterfallPackets(const SpectrumFrame& frame)
 {
     constexpr int headerBytes = 28;
     constexpr int subheaderBytes = 36;
-    constexpr qint64 lowFrequency = 14000000LL * 1048576LL;
-    constexpr qint64 binBandwidth = 200000000LL;
-    const int packetBytes = headerBytes + subheaderBytes + frame.pixels.size() * 2;
-    QByteArray packet(packetBytes, Qt::Uninitialized);
-    uchar* data = reinterpret_cast<uchar*>(packet.data());
-    writeHeader(data, packetWord(m_spectrumSequence, packetBytes / 4),
-                kWaterfallStreamId, kWaterfallClass);
-
-    qToBigEndian(lowFrequency, data + headerBytes);
-    qToBigEndian(binBandwidth, data + headerBytes + 8);
-    qToBigEndian<quint32>(40, data + headerBytes + 16);
-    qToBigEndian<quint16>(frame.pixels.size(), data + headerBytes + 20);
-    qToBigEndian<quint16>(1, data + headerBytes + 22);
-    qToBigEndian(frame.index, data + headerBytes + 24);
-    qToBigEndian<quint32>(96 * 128, data + headerBytes + 28);
-    qToBigEndian<quint16>(frame.pixels.size(), data + headerBytes + 32);
-    qToBigEndian<quint16>(0, data + headerBytes + 34);
-
-    for (int index = 0; index < frame.pixels.size(); ++index) {
-        const float dbm = kSpectrumMaxDbm
-            - static_cast<float>(frame.pixels.at(index))
-                * (kSpectrumMaxDbm - kSpectrumMinDbm) / (kSpectrumPixels - 1);
-        const int intensity = qBound(
-            kWaterfallMinIntensity,
-            kWaterfallMinIntensity + qRound((dbm - kSpectrumMinDbm)
-                / (kSpectrumMaxDbm - kSpectrumMinDbm)
-                * (kWaterfallMaxIntensity - kWaterfallMinIntensity)),
-            kWaterfallMaxIntensity);
-        qToBigEndian<quint16>(static_cast<quint16>(intensity * 128),
-                              data + headerBytes + subheaderBytes + index * 2);
+    const int binsPerPacket = qMax(1,
+        (m_networkMtu - kIpv4AndUdpHeaderBytes - headerBytes - subheaderBytes) / 2);
+    const qint64 lowFrequency = (frame.centerFrequencyHz - frame.bandwidthHz / 2) * 1048576LL;
+    // A Flex waterfall tile stores the width of one bin as Hz x 2^20.
+    const qint64 binBandwidth = qRound64(
+        static_cast<double>(frame.bandwidthHz) / frame.pixels.size() * 1048576.0);
+    QList<QByteArray> packets;
+    for (int firstBin = 0; firstBin < frame.pixels.size(); firstBin += binsPerPacket) {
+        const int binCount = qMin(binsPerPacket, frame.pixels.size() - firstBin);
+        const int packetBytes = headerBytes + subheaderBytes + binCount * 2;
+        QByteArray packet(packetBytes, Qt::Uninitialized);
+        uchar* data = reinterpret_cast<uchar*>(packet.data());
+        writeHeader(data, packetWord(m_waterfallSequence, packetBytes / 4),
+                    kWaterfallStreamId, kWaterfallClass);
+        qToBigEndian(lowFrequency, data + headerBytes);
+        qToBigEndian(binBandwidth, data + headerBytes + 8);
+        qToBigEndian<quint32>(40, data + headerBytes + 16);
+        qToBigEndian<quint16>(binCount, data + headerBytes + 20);
+        qToBigEndian<quint16>(1, data + headerBytes + 22);
+        qToBigEndian(frame.index, data + headerBytes + 24);
+        qToBigEndian<quint32>(96 * 128, data + headerBytes + 28);
+        qToBigEndian<quint16>(frame.pixels.size(), data + headerBytes + 32);
+        qToBigEndian<quint16>(firstBin, data + headerBytes + 34);
+        for (int index = 0; index < binCount; ++index) {
+            const float dbm = frame.maximumDbm
+                - static_cast<float>(frame.pixels.at(firstBin + index))
+                    * (frame.maximumDbm - frame.minimumDbm) / (kSpectrumPixels - 1);
+            const int intensity = qBound(kWaterfallMinIntensity,
+                kWaterfallMinIntensity + qRound((dbm - frame.minimumDbm)
+                    / (frame.maximumDbm - frame.minimumDbm)
+                    * (kWaterfallMaxIntensity - kWaterfallMinIntensity)),
+                kWaterfallMaxIntensity);
+            qToBigEndian<quint16>(static_cast<quint16>(intensity * 128),
+                                  data + headerBytes + subheaderBytes + index * 2);
+        }
+        packets.append(packet);
+        m_waterfallSequence = (m_waterfallSequence + 1) & 0x0F;
     }
-
-    return packet;
+    return packets;
 }
 
 QByteArray VitaPacketBuilder::createAudioPacket(const QVector<float>& monoAudio)

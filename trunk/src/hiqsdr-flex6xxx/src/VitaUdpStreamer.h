@@ -15,6 +15,7 @@ public:
     explicit VitaUdpStreamer(QObject* parent = nullptr);
 
     void send(const QByteArray& packet, const QList<UdpEndpoint>& endpoints);
+    void send(const QList<QByteArray>& packets, const QList<UdpEndpoint>& endpoints);
 
 private:
     QUdpSocket m_socket;

@@ -94,3 +94,6 @@ trunk/src/usrp/build-aux/lt~obsolete.m4
 trunk/src/usrp/ltmain.sh
 trunk/src/sdr1000/sdr1000
 trunk/src/hiqsdr-flex6xxx/build/
+trunk/src/hiqsdr-flex6xxx/logs/
+trunk/src/hiqsdr-flex6xxx/settings/
+trunk/src/hiqsdr-flex6xxx/.qtcreator/CMakeLists.txt.user

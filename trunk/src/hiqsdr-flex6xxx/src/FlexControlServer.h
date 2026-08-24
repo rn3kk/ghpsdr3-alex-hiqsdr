@@ -22,11 +22,22 @@ public:
 
     bool start(const QHostAddress& address, quint16 port);
     QList<UdpEndpoint> udpEndpoints() const;
+    bool isPanUpdatePending() const;
+    int spectrumFps() const;
+    int waterfallRate() const;
+    int networkMtu() const;
+
+signals:
+    void spectrumFpsChanged(int framesPerSecond);
+    void waterfallRateChanged(int rate);
+    void networkMtuChanged(int mtu);
+
 private slots:
     void onNewConnection();
     void onClientReadyRead();
     void onClientDisconnected();
     void onDiscoveryTimeout();
+    void onPanUpdateTimeout();
 
 private:
     void processCommand(QTcpSocket* socket, const QString& line);
@@ -48,21 +59,39 @@ private:
     void sendRadioStatus(QTcpSocket* socket) const;
     void sendSliceStatus(QTcpSocket* socket) const;
     void sendPanStatus(QTcpSocket* socket) const;
+    void sendPanStatusToClients() const;
     void sendMeterStatus(QTcpSocket* socket) const;
     void sendTransmitStatus(QTcpSocket* socket) const;
     void sendDiscoveryPacket();
+    void loadSettings();
+    void loadDisplayProfile();
+    void saveSettings() const;
     quint32 clientHandle(QTcpSocket* socket) const;
 
     RadioBackend* m_radioBackend;
     QTcpServer m_server;
     QUdpSocket m_discoverySocket;
     QTimer* m_discoveryTimer;
+    QTimer* m_panUpdateTimer;
     QMap<QTcpSocket*, QByteArray> m_readBuffers;
     QMap<QTcpSocket*, quint32> m_clientHandles;
     QMap<QTcpSocket*, quint16> m_clientUdpPorts;
     QHostAddress m_listenAddress;
     quint16 m_port{4992};
     quint32 m_nextHandle{0xF8400001};
+    double m_pendingPanCenterFrequencyMhz{0.0};
+    int m_pendingPanBandwidthHz{0};
+    bool m_panUpdatePending{false};
+    double m_panMinimumDbm{-140.0};
+    double m_panMaximumDbm{-20.0};
+    int m_panRfGain{0};
+    int m_panSpectrumPoints{700};
+    int m_spectrumFps{20};
+    int m_waterfallRate{25};
+    int m_networkMtu{1450};
+    int m_waterfallBlackLevel{15};
+    int m_waterfallColorGain{50};
+    bool m_waterfallAutoBlack{true};
     bool m_txAssigned{true};
     bool m_transmitting{false};
 };

@@ -1,46 +1,55 @@
 #include "HiqSdrBackend.h"
 
+#include <QDebug>
+
 #include "hiqsdr/HiqSdrDevice.h"
+#include "hiqsdr/HiqSdrIqReceiver.h"
+#include "hiqsdr/HiqSdrSpectrumProcessor.h"
 
 namespace {
-constexpr int kHiqSdrSampleRate = 192000;
-constexpr int kSpectrumBins = 1024;
-constexpr quint16 kBlankSpectrumPixel = 700;
+constexpr int kMaximumPanBandwidthHz = 960000;
 }
 
 HiqSdrBackend::HiqSdrBackend(const QString& deviceAddress, QObject* parent)
     : RadioBackend(parent),
       m_device(new HiqSdrDevice(deviceAddress, this)),
+      m_iqReceiver(new HiqSdrIqReceiver(deviceAddress, this)),
+      m_spectrumProcessor(std::make_unique<HiqSdrSpectrumProcessor>()),
       m_deviceAddress(deviceAddress)
 {
+    m_spectrumProcessor->setSampleRate(m_sampleRate);
+    m_spectrumProcessor->setPanBandwidthHz(m_panBandwidthHz);
+    m_spectrumProcessor->setCenterFrequencyHz(qRound64(m_panCenterFrequencyMhz * 1000000.0));
+    connect(m_iqReceiver, &HiqSdrIqReceiver::iqDatagramReceived,
+            this, &HiqSdrBackend::onIqDatagramReceived);
 }
 
 HiqSdrBackend::~HiqSdrBackend()
 {
     if (m_started) {
+        m_iqReceiver->stop();
         m_device->close();
     }
 }
 
 bool HiqSdrBackend::start()
 {
-    const long long frequencyHz = qRound64(m_sliceFrequencyMhz * 1000000.0);
-    if (!m_device->open(kHiqSdrSampleRate, frequencyHz)) {
+    const long long frequencyHz = qRound64(m_panCenterFrequencyMhz * 1000000.0);
+    if (!m_device->open(m_sampleRate, frequencyHz)) {
         return false;
     }
     m_started = true;
-    return sendInitialControlState();
+    if (!sendInitialControlState() || !m_iqReceiver->start()) {
+        m_started = false;
+        m_device->close();
+        return false;
+    }
+    return true;
 }
 
 bool HiqSdrBackend::setSliceFrequencyMhz(double frequencyMhz)
 {
-    if (frequencyMhz <= 0.0 || !m_started) {
-        return false;
-    }
-    if (!m_device->setFrequency(qRound64(frequencyMhz * 1000000.0))) {
-        return false;
-    }
-    if (!m_device->setPreselector(preselectorForFrequency(frequencyMhz))) {
+    if (frequencyMhz <= 0.0) {
         return false;
     }
     m_sliceFrequencyMhz = frequencyMhz;
@@ -50,6 +59,101 @@ bool HiqSdrBackend::setSliceFrequencyMhz(double frequencyMhz)
 double HiqSdrBackend::sliceFrequencyMhz() const
 {
     return m_sliceFrequencyMhz;
+}
+
+bool HiqSdrBackend::setPanCenterFrequencyMhz(double frequencyMhz)
+{
+    if (frequencyMhz <= 0.0) {
+        return false;
+    }
+    if (!m_started) {
+        m_panCenterFrequencyMhz = frequencyMhz;
+        m_spectrumProcessor->setCenterFrequencyHz(qRound64(frequencyMhz * 1000000.0));
+        return true;
+    }
+    if (!m_device->setFrequency(qRound64(frequencyMhz * 1000000.0))) {
+        return false;
+    }
+    if (!m_device->setPreselector(preselectorForFrequency(frequencyMhz))) {
+        return false;
+    }
+    m_panCenterFrequencyMhz = frequencyMhz;
+    m_spectrumProcessor->setCenterFrequencyHz(qRound64(frequencyMhz * 1000000.0));
+    return true;
+}
+
+double HiqSdrBackend::panCenterFrequencyMhz() const
+{
+    return m_panCenterFrequencyMhz;
+}
+
+bool HiqSdrBackend::setPanBandwidthHz(int bandwidthHz)
+{
+    if (bandwidthHz > kMaximumPanBandwidthHz) {
+        qWarning() << "Requested pan bandwidth exceeds HiQSDR limit; using"
+                   << kMaximumPanBandwidthHz << "Hz instead of" << bandwidthHz;
+        bandwidthHz = kMaximumPanBandwidthHz;
+    }
+    const int sampleRate = sampleRateForPanBandwidth(bandwidthHz);
+    if (sampleRate == 0) {
+        return false;
+    }
+    if (sampleRate == m_sampleRate) {
+        m_panBandwidthHz = bandwidthHz;
+        m_spectrumProcessor->setPanBandwidthHz(m_panBandwidthHz);
+        return true;
+    }
+
+    const int previousSampleRate = m_sampleRate;
+    if (m_started) {
+        m_iqReceiver->stop();
+        if (!m_device->setSampleRate(sampleRate)) {
+            m_iqReceiver->start();
+            return false;
+        }
+        if (!m_iqReceiver->start()) {
+            m_device->setSampleRate(previousSampleRate);
+            m_iqReceiver->start();
+            return false;
+        }
+    }
+    m_sampleRate = sampleRate;
+    m_panBandwidthHz = bandwidthHz;
+    m_spectrumProcessor->setSampleRate(m_sampleRate);
+    m_spectrumProcessor->setPanBandwidthHz(m_panBandwidthHz);
+    qInfo() << "HiQSDR pan bandwidth:" << bandwidthHz
+            << "sample rate:" << m_sampleRate;
+    return true;
+}
+
+int HiqSdrBackend::panBandwidthHz() const
+{
+    return m_panBandwidthHz;
+}
+
+int HiqSdrBackend::spectrumSampleRateHz() const
+{
+    return m_sampleRate;
+}
+
+bool HiqSdrBackend::setSpectrumPointCount(int pointCount)
+{
+    m_spectrumProcessor->setOutputPointCount(pointCount);
+    return true;
+}
+
+void HiqSdrBackend::setSpectrumFrameRate(int framesPerSecond)
+{
+    m_spectrumProcessor->setFrameRate(framesPerSecond);
+}
+
+bool HiqSdrBackend::setSpectrumDbmRange(float minimumDbm, float maximumDbm)
+{
+    if (minimumDbm >= maximumDbm) {
+        return false;
+    }
+    m_spectrumProcessor->setDbmRange(minimumDbm, maximumDbm);
+    return true;
 }
 
 bool HiqSdrBackend::setFilter(int lowHz, int highHz)
@@ -81,7 +185,14 @@ bool HiqSdrBackend::setAntenna(const QString& antenna)
     } else if (antenna == QStringLiteral("ANT2")) {
         input = 1;
     }
-    if (input < 0 || !m_started || !m_device->setAntennaInput(input)) {
+    if (input < 0) {
+        return false;
+    }
+    if (!m_started) {
+        m_antenna = antenna;
+        return true;
+    }
+    if (!m_device->setAntennaInput(input)) {
         return false;
     }
     m_antenna = antenna;
@@ -95,7 +206,11 @@ QString HiqSdrBackend::antenna() const
 
 bool HiqSdrBackend::setPreampEnabled(bool enabled)
 {
-    if (!m_started || !m_device->setPreampEnabled(enabled)) {
+    if (!m_started) {
+        m_preampEnabled = enabled;
+        return true;
+    }
+    if (!m_device->setPreampEnabled(enabled)) {
         return false;
     }
     m_preampEnabled = enabled;
@@ -109,8 +224,14 @@ bool HiqSdrBackend::preampEnabled() const
 
 bool HiqSdrBackend::setAttenuatorDb(int attenuationDb)
 {
-    if (attenuationDb < 0 || attenuationDb > 44 || !m_started
-        || !m_device->setAttenuatorDb(attenuationDb)) {
+    if (attenuationDb < 0 || attenuationDb > 44) {
+        return false;
+    }
+    if (!m_started) {
+        m_attenuatorDb = attenuationDb;
+        return true;
+    }
+    if (!m_device->setAttenuatorDb(attenuationDb)) {
         return false;
     }
     m_attenuatorDb = attenuationDb;
@@ -146,12 +267,14 @@ bool HiqSdrBackend::audioMuted() const
     return m_audioMuted;
 }
 
+bool HiqSdrBackend::hasSpectrumFrame() const
+{
+    return m_spectrumProcessor->hasSpectrumFrame();
+}
+
 SpectrumFrame HiqSdrBackend::createSpectrumFrame()
 {
-    SpectrumFrame frame;
-    frame.index = m_frameIndex++;
-    frame.pixels.fill(kBlankSpectrumPixel, kSpectrumBins);
-    return frame;
+    return m_spectrumProcessor->createSpectrumFrame();
 }
 
 QVector<float> HiqSdrBackend::createUsbAudio(int frameCount)
@@ -164,12 +287,47 @@ float HiqSdrBackend::filterLevelDbm() const
     return -150.0f;
 }
 
+void HiqSdrBackend::onIqDatagramReceived(const QByteArray& datagram)
+{
+    ++m_iqDatagramsReceived;
+    if (m_iqDatagramsReceived == 1) {
+        qInfo() << "HiQSDR IQ stream is receiving 1442-byte datagrams";
+    }
+    m_spectrumProcessor->addIqDatagram(datagram);
+}
+
 bool HiqSdrBackend::sendInitialControlState()
 {
-    return setSliceFrequencyMhz(m_sliceFrequencyMhz)
+    return setPanCenterFrequencyMhz(m_panCenterFrequencyMhz)
         && setAntenna(m_antenna)
         && setPreampEnabled(m_preampEnabled)
         && setAttenuatorDb(m_attenuatorDb);
+}
+
+int HiqSdrBackend::sampleRateForPanBandwidth(int bandwidthHz) const
+{
+    if (bandwidthHz <= 40000) {
+        return 96000;
+    }
+    if (bandwidthHz <= 80000) {
+        return 192000;
+    }
+    if (bandwidthHz <= 200000) {
+        return 240000;
+    }
+    if (bandwidthHz <= 280000) {
+        return 320000;
+    }
+    if (bandwidthHz <= 400000) {
+        return 480000;
+    }
+    if (bandwidthHz <= 800000) {
+        return 960000;
+    }
+    if (bandwidthHz <= 960000) {
+        return 960000;
+    }
+    return 0;
 }
 
 int HiqSdrBackend::preselectorForFrequency(double frequencyMhz) const

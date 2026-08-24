@@ -1,6 +1,8 @@
 #include "HiqSdrDevice.h"
 
 #include <QByteArray>
+#include <QDebug>
+#include <QHostAddress>
 #include <QUdpSocket>
 #include <QtEndian>
 
@@ -44,19 +46,38 @@ bool HiqSdrDevice::open(int sampleRate, qint64 frequencyHz)
         return true;
     }
     if (decimationCode(sampleRate) == 0) {
+        qWarning() << "Unsupported HiQSDR sample rate:" << sampleRate;
+        return false;
+    }
+    if (QHostAddress(m_address).isNull()) {
+        qWarning() << "Invalid HiQSDR address:" << m_address;
         return false;
     }
 
     m_sampleRate = sampleRate;
     m_frequencyHz = frequencyHz;
     m_controlSocket->connectToHost(m_address, kControlPort);
-    if (!m_controlSocket->waitForConnected(kControlResponseTimeoutMs) || !ping()) {
+    if (!m_controlSocket->waitForConnected(kControlResponseTimeoutMs)) {
+        qWarning() << "Cannot connect to HiQSDR control port" << m_address
+                   << kControlPort << m_controlSocket->errorString();
+        close();
+        return false;
+    }
+    if (!ping()) {
+        qWarning() << "HiQSDR did not confirm the control packet from" << m_address;
         close();
         return false;
     }
 
     m_isOpen = true;
-    return sendControlPacket();
+    if (!sendControlPacket()) {
+        qWarning() << "Cannot send initial HiQSDR control state to" << m_address;
+        close();
+        return false;
+    }
+    qInfo() << "HiQSDR control connected:" << m_address
+            << "sample rate:" << m_sampleRate;
+    return true;
 }
 
 void HiqSdrDevice::close()
@@ -162,16 +183,28 @@ bool HiqSdrDevice::ping()
     packet.firmwareVersion = 0;
 
     const QByteArray data(reinterpret_cast<const char*>(&packet), sizeof(packet));
-    if (!sendPacket(data) || !m_controlSocket->waitForReadyRead(kControlResponseTimeoutMs)) {
+    if (!sendPacket(data)) {
+        qWarning() << "Cannot send HiQSDR probe:" << m_controlSocket->errorString();
+        return false;
+    }
+    if (!m_controlSocket->waitForReadyRead(kControlResponseTimeoutMs)) {
+        qWarning() << "HiQSDR control response timeout:" << m_controlSocket->errorString();
         return false;
     }
     const qint64 bytes = m_controlSocket->pendingDatagramSize();
     if (bytes < 14 || bytes > static_cast<qint64>(sizeof(ControlPacket))) {
+        qWarning() << "Unexpected HiQSDR control response length:" << bytes;
         return false;
     }
     QByteArray response;
     response.resize(static_cast<int>(bytes));
-    return m_controlSocket->readDatagram(response.data(), response.size()) == bytes;
+    const qint64 received = m_controlSocket->readDatagram(response.data(), response.size());
+    if (received != bytes) {
+        qWarning() << "Cannot read HiQSDR control response:" << m_controlSocket->errorString();
+        return false;
+    }
+    qInfo() << "HiQSDR control response received:" << bytes << "bytes";
+    return true;
 }
 
 bool HiqSdrDevice::sendControlPacket()
@@ -197,10 +230,14 @@ bool HiqSdrDevice::sendControlPacket()
 
 bool HiqSdrDevice::sendPacket(const QByteArray& packet)
 {
-    if (m_controlSocket->write(packet) != packet.size()) {
+    const qint64 written = m_controlSocket->write(packet);
+    if (written != packet.size()) {
+        qWarning() << "Cannot queue HiQSDR UDP packet:" << m_controlSocket->errorString();
         return false;
     }
-    return m_controlSocket->waitForBytesWritten(kControlResponseTimeoutMs);
+    // QUdpSocket accepts a complete datagram synchronously. Waiting for a
+    // bytesWritten signal here can fail although the packet was queued.
+    return true;
 }
 
 quint32 HiqSdrDevice::tuningPhase(qint64 frequencyHz) const

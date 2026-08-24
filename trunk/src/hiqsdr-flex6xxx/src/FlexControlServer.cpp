@@ -1,7 +1,10 @@
 #include "FlexControlServer.h"
 
 #include <QDebug>
+#include <QDir>
+#include <QSettings>
 #include <QTimer>
+#include <QtMath>
 
 #include "RadioBackend.h"
 
@@ -12,18 +15,36 @@ const QString kVersion = QStringLiteral("4.2.20.0");
 const QString kRadioName = QStringLiteral("HiQSDR Flex Gateway");
 constexpr quint32 kInvalidArgumentError = 0x50000002;
 constexpr quint32 kUnsupportedCommandError = 0x50000015;
+constexpr int kPanUpdateDelayMs = 150;
+constexpr int kMaximumSpectrumFps = 25;
+constexpr int kMinimumWaterfallRate = 1;
+constexpr int kMaximumWaterfallRate = 100;
+constexpr int kMinimumNetworkMtu = 576;
+constexpr int kMaximumNetworkMtu = 9000;
 }
 
 FlexControlServer::FlexControlServer(RadioBackend* radioBackend, QObject* parent)
     : QObject(parent),
       m_radioBackend(radioBackend),
-      m_discoveryTimer(new QTimer(this))
+      m_discoveryTimer(new QTimer(this)),
+      m_panUpdateTimer(new QTimer(this))
 {
     m_discoveryTimer->setInterval(1000);
+    m_panUpdateTimer->setSingleShot(true);
     connect(&m_server, &QTcpServer::newConnection,
             this, &FlexControlServer::onNewConnection);
     connect(m_discoveryTimer, &QTimer::timeout,
             this, &FlexControlServer::onDiscoveryTimeout);
+    connect(m_panUpdateTimer, &QTimer::timeout,
+            this, &FlexControlServer::onPanUpdateTimeout);
+    loadSettings();
+    // Keep IQ processing independent from the spectrum display slider.
+    m_radioBackend->setSpectrumFrameRate(kMaximumSpectrumFps);
+    if (!m_radioBackend->setSpectrumDbmRange(
+            static_cast<float>(m_panMinimumDbm), static_cast<float>(m_panMaximumDbm))) {
+        qWarning() << "Cannot apply saved display range";
+    }
+    saveSettings();
 }
 
 bool FlexControlServer::start(const QHostAddress& address, quint16 port)
@@ -54,6 +75,26 @@ QList<UdpEndpoint> FlexControlServer::udpEndpoints() const
     return endpoints;
 }
 
+bool FlexControlServer::isPanUpdatePending() const
+{
+    return m_panUpdatePending;
+}
+
+int FlexControlServer::spectrumFps() const
+{
+    return m_spectrumFps;
+}
+
+int FlexControlServer::waterfallRate() const
+{
+    return m_waterfallRate;
+}
+
+int FlexControlServer::networkMtu() const
+{
+    return m_networkMtu;
+}
+
 void FlexControlServer::onNewConnection()
 {
     while (m_server.hasPendingConnections()) {
@@ -69,6 +110,8 @@ void FlexControlServer::onNewConnection()
                 this, &FlexControlServer::onClientDisconnected);
         sendLine(socket, QStringLiteral("V%1").arg(kVersion));
         sendLine(socket, QStringLiteral("H%1").arg(handle, 0, 16).toUpper());
+        qInfo() << "Flex client connected:" << socket->peerAddress().toString()
+                << "handle:" << QString::number(handle, 16).toUpper();
     }
 }
 
@@ -96,6 +139,8 @@ void FlexControlServer::onClientDisconnected()
     if (!socket) {
         return;
     }
+    qWarning() << "Flex client disconnected:" << socket->peerAddress().toString()
+               << "reason:" << socket->errorString();
     m_readBuffers.remove(socket);
     m_clientHandles.remove(socket);
     m_clientUdpPorts.remove(socket);
@@ -105,6 +150,24 @@ void FlexControlServer::onClientDisconnected()
 void FlexControlServer::onDiscoveryTimeout()
 {
     sendDiscoveryPacket();
+}
+
+void FlexControlServer::onPanUpdateTimeout()
+{
+    if (!m_panUpdatePending) {
+        return;
+    }
+
+    m_panUpdatePending = false;
+    if (!m_radioBackend->setPanBandwidthHz(m_pendingPanBandwidthHz)
+        || !m_radioBackend->setPanCenterFrequencyMhz(m_pendingPanCenterFrequencyMhz)) {
+        qWarning() << "Cannot apply requested pan settings";
+        return;
+    }
+
+    loadDisplayProfile();
+    saveSettings();
+    sendPanStatusToClients();
 }
 
 void FlexControlServer::processCommand(QTcpSocket* socket, const QString& line)
@@ -189,6 +252,7 @@ bool FlexControlServer::processSliceTune(QTcpSocket* socket, quint32 sequence,
         sendResponse(socket, sequence, kInvalidArgumentError, QStringLiteral("Invalid frequency"));
         return true;
     }
+    saveSettings();
     sendSliceStatus(socket);
     sendResponse(socket, sequence, 0);
     return true;
@@ -248,6 +312,7 @@ bool FlexControlServer::processSliceSet(QTcpSocket* socket, quint32 sequence,
         sendResponse(socket, sequence, kInvalidArgumentError, QStringLiteral("Invalid slice setting"));
         return true;
     }
+    saveSettings();
     sendSliceStatus(socket);
     sendResponse(socket, sequence, 0);
     return true;
@@ -272,6 +337,7 @@ bool FlexControlServer::processFilter(QTcpSocket* socket, quint32 sequence,
         sendResponse(socket, sequence, kInvalidArgumentError, QStringLiteral("Invalid filter"));
         return true;
     }
+    saveSettings();
     sendSliceStatus(socket);
     sendResponse(socket, sequence, 0);
     return true;
@@ -283,10 +349,34 @@ bool FlexControlServer::processClientCommand(QTcpSocket* socket, quint32 sequenc
     if (!command.startsWith(QStringLiteral("client "))) {
         return false;
     }
+    if (command.startsWith(QStringLiteral("client set "))) {
+        const QStringList parts = command.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        for (const QString& part : parts) {
+            if (!part.startsWith(QStringLiteral("network_mtu="))) {
+                continue;
+            }
+            bool valid = false;
+            const int mtu = part.mid(12).toInt(&valid);
+            if (!valid) {
+                sendResponse(socket, sequence, kInvalidArgumentError,
+                             QStringLiteral("Invalid network MTU"));
+                return true;
+            }
+            const int boundedMtu = qBound(kMinimumNetworkMtu, mtu, kMaximumNetworkMtu);
+            if (m_networkMtu != boundedMtu) {
+                m_networkMtu = boundedMtu;
+                emit networkMtuChanged(m_networkMtu);
+                saveSettings();
+            }
+            sendResponse(socket, sequence, 0, QString::number(m_networkMtu));
+            return true;
+        }
+        sendResponse(socket, sequence, 0);
+        return true;
+    }
     if (command.startsWith(QStringLiteral("client program "))
         || command.startsWith(QStringLiteral("client low_bw_connect"))
-        || command.startsWith(QStringLiteral("client station "))
-        || command.startsWith(QStringLiteral("client set "))) {
+        || command.startsWith(QStringLiteral("client station "))) {
         sendResponse(socket, sequence, 0);
         return true;
     }
@@ -301,6 +391,10 @@ bool FlexControlServer::processClientCommand(QTcpSocket* socket, quint32 sequenc
 bool FlexControlServer::processKeepaliveCommand(QTcpSocket* socket, quint32 sequence,
                                                 const QString& command)
 {
+    if (command == QStringLiteral("ping")) {
+        sendResponse(socket, sequence, 0);
+        return true;
+    }
     if (!command.startsWith(QStringLiteral("keepalive "))) {
         return false;
     }
@@ -395,12 +489,158 @@ bool FlexControlServer::processDisplayCommand(QTcpSocket* socket, quint32 sequen
     if (!command.startsWith(QStringLiteral("display "))) {
         return false;
     }
+    if (command == QStringLiteral("display pan rfgain_info 0x40000000")) {
+        sendPanStatus(socket);
+        sendResponse(socket, sequence, 0);
+        return true;
+    }
+    if (command.startsWith(QStringLiteral("display pan set 0x40000000"))) {
+        const QStringList parts = command.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        double centerFrequencyMhz = m_panUpdatePending
+            ? m_pendingPanCenterFrequencyMhz : m_radioBackend->panCenterFrequencyMhz();
+        int bandwidthHz = m_panUpdatePending
+            ? m_pendingPanBandwidthHz : m_radioBackend->panBandwidthHz();
+        bool panViewChanged = false;
+        double minimumDbm = m_panMinimumDbm;
+        double maximumDbm = m_panMaximumDbm;
+        int rfGain = m_panRfGain;
+        int spectrumPoints = m_panSpectrumPoints;
+        int spectrumFps = m_spectrumFps;
+        for (const QString& part : parts) {
+            if (part.startsWith(QStringLiteral("center="))) {
+                bool centerIsValid = false;
+                centerFrequencyMhz = part.mid(7).toDouble(&centerIsValid);
+                if (!centerIsValid || centerFrequencyMhz <= 0.0) {
+                    sendResponse(socket, sequence, kInvalidArgumentError,
+                                 QStringLiteral("Invalid pan center frequency"));
+                    return true;
+                }
+                panViewChanged = true;
+            } else if (part.startsWith(QStringLiteral("bandwidth="))) {
+                bool bandwidthIsValid = false;
+                const double bandwidthMhz = part.mid(10).toDouble(&bandwidthIsValid);
+                bandwidthHz = qRound(bandwidthMhz * 1000000.0);
+                if (!bandwidthIsValid || bandwidthHz <= 0) {
+                    sendResponse(socket, sequence, kInvalidArgumentError,
+                                 QStringLiteral("Invalid pan bandwidth"));
+                    return true;
+                }
+                panViewChanged = true;
+            } else if (part.startsWith(QStringLiteral("min_dbm="))) {
+                bool valueIsValid = false;
+                minimumDbm = part.mid(8).toDouble(&valueIsValid);
+                if (!valueIsValid) {
+                    sendResponse(socket, sequence, kInvalidArgumentError,
+                                 QStringLiteral("Invalid pan minimum level"));
+                    return true;
+                }
+            } else if (part.startsWith(QStringLiteral("max_dbm="))) {
+                bool valueIsValid = false;
+                maximumDbm = part.mid(8).toDouble(&valueIsValid);
+                if (!valueIsValid) {
+                    sendResponse(socket, sequence, kInvalidArgumentError,
+                                 QStringLiteral("Invalid pan maximum level"));
+                    return true;
+                }
+            } else if (part.startsWith(QStringLiteral("rfgain="))) {
+                bool valueIsValid = false;
+                rfGain = part.mid(7).toInt(&valueIsValid);
+                if (!valueIsValid) {
+                    sendResponse(socket, sequence, kInvalidArgumentError,
+                                 QStringLiteral("Invalid pan RF gain"));
+                    return true;
+                }
+            } else if (part.startsWith(QStringLiteral("xpixels="))) {
+                bool valueIsValid = false;
+                spectrumPoints = part.mid(8).toInt(&valueIsValid);
+                if (!valueIsValid || spectrumPoints < 128 || spectrumPoints > 8192) {
+                    sendResponse(socket, sequence, kInvalidArgumentError,
+                                 QStringLiteral("Invalid pan pixel count"));
+                    return true;
+                }
+            } else if (part.startsWith(QStringLiteral("fps="))) {
+                bool valueIsValid = false;
+                spectrumFps = part.mid(4).toInt(&valueIsValid);
+                if (!valueIsValid || spectrumFps < 1) {
+                    sendResponse(socket, sequence, kInvalidArgumentError,
+                                 QStringLiteral("Invalid spectrum FPS"));
+                    return true;
+                }
+                spectrumFps = qMin(spectrumFps, kMaximumSpectrumFps);
+            }
+        }
+        if (minimumDbm >= maximumDbm) {
+            sendResponse(socket, sequence, kInvalidArgumentError,
+                         QStringLiteral("Invalid pan level range"));
+            return true;
+        }
+        if (!m_radioBackend->setSpectrumDbmRange(
+                static_cast<float>(minimumDbm), static_cast<float>(maximumDbm))) {
+            sendResponse(socket, sequence, kInvalidArgumentError,
+                         QStringLiteral("Cannot set pan level range"));
+            return true;
+        }
+        m_panMinimumDbm = minimumDbm;
+        m_panMaximumDbm = maximumDbm;
+        m_panRfGain = rfGain;
+        if (!m_radioBackend->setSpectrumPointCount(spectrumPoints)) {
+            sendResponse(socket, sequence, kInvalidArgumentError,
+                         QStringLiteral("Cannot set pan pixel count"));
+            return true;
+        }
+        m_panSpectrumPoints = spectrumPoints;
+        if (m_spectrumFps != spectrumFps) {
+            m_spectrumFps = spectrumFps;
+            emit spectrumFpsChanged(m_spectrumFps);
+        }
+        if (panViewChanged) {
+            m_pendingPanCenterFrequencyMhz = centerFrequencyMhz;
+            m_pendingPanBandwidthHz = bandwidthHz;
+            m_panUpdatePending = true;
+            m_panUpdateTimer->start(kPanUpdateDelayMs);
+        }
+        saveSettings();
+        if (!panViewChanged) {
+            sendPanStatus(socket);
+        }
+        sendResponse(socket, sequence, 0, QStringLiteral("40000000"));
+        return true;
+    }
     if (command.startsWith(QStringLiteral("display pan create"))
-        || command.startsWith(QStringLiteral("display panafall create"))
-        || command.startsWith(QStringLiteral("display pan set 0x40000000"))
-        || command.startsWith(QStringLiteral("display panafall set 0x42000000"))) {
+        || command.startsWith(QStringLiteral("display panafall create"))) {
         sendPanStatus(socket);
         sendResponse(socket, sequence, 0, QStringLiteral("40000000"));
+        return true;
+    }
+    if (command.startsWith(QStringLiteral("display panafall set 0x42000000"))) {
+        const QStringList parts = command.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        int blackLevel = m_waterfallBlackLevel;
+        int colorGain = m_waterfallColorGain;
+        bool autoBlack = m_waterfallAutoBlack;
+        int waterfallRate = m_waterfallRate;
+        for (const QString& part : parts) {
+            if (part.startsWith(QStringLiteral("black_level="))) {
+                blackLevel = part.mid(12).toInt();
+            } else if (part.startsWith(QStringLiteral("color_gain="))) {
+                colorGain = part.mid(11).toInt();
+            } else if (part.startsWith(QStringLiteral("auto_black="))) {
+                autoBlack = part.mid(11) != QStringLiteral("0");
+            } else if (part.startsWith(QStringLiteral("line_duration="))) {
+                waterfallRate = part.mid(14).toInt();
+            }
+        }
+        m_waterfallBlackLevel = blackLevel;
+        m_waterfallColorGain = colorGain;
+        m_waterfallAutoBlack = autoBlack;
+        waterfallRate = qBound(kMinimumWaterfallRate, waterfallRate,
+                               kMaximumWaterfallRate);
+        if (m_waterfallRate != waterfallRate) {
+            m_waterfallRate = waterfallRate;
+            emit waterfallRateChanged(m_waterfallRate);
+        }
+        saveSettings();
+        sendPanStatus(socket);
+        sendResponse(socket, sequence, 0);
         return true;
     }
     sendUnsupportedCommand(socket, sequence, command);
@@ -490,12 +730,34 @@ void FlexControlServer::sendPanStatus(QTcpSocket* socket) const
 {
     const QString handleText = QString::number(clientHandle(socket), 16).toUpper();
     sendLine(socket, QStringLiteral("S%1|display pan 0x40000000 client_handle=0x%1 "
-                                    "waterfall=0x42000000 center=14.100 bandwidth=0.200 "
-                                    "min_dbm=-140 max_dbm=-20 x_pixels=1024 y_pixels=700 "
-                                    "fps=20 ant_list=ANT1").arg(handleText));
+                                    "waterfall=0x42000000 center=%2 bandwidth=%3 "
+                                    "min_dbm=%4 max_dbm=%5 rfgain=%6 "
+                                    "rfgain_low=-8 rfgain_high=32 x_pixels=%7 y_pixels=700 "
+                                    "fps=%8 ant_list=ANT1")
+                         .arg(handleText)
+                         .arg(m_radioBackend->panCenterFrequencyMhz(), 0, 'f', 6)
+                         .arg(static_cast<double>(m_radioBackend->panBandwidthHz()) / 1000000.0,
+                              0, 'f', 6)
+                         .arg(m_panMinimumDbm, 0, 'f', 2)
+                         .arg(m_panMaximumDbm, 0, 'f', 2)
+                         .arg(m_panRfGain)
+                         .arg(m_panSpectrumPoints)
+                         .arg(m_spectrumFps));
     sendLine(socket, QStringLiteral("S%1|display waterfall 0x42000000 client_handle=0x%1 "
-                                    "panadapter=0x40000000 line_duration=20 auto_black=1 "
-                                    "black_level=15 color_gain=50").arg(handleText));
+                                    "panadapter=0x40000000 line_duration=%2 auto_black=%3 "
+                                    "black_level=%4 color_gain=%5")
+                         .arg(handleText)
+                         .arg(m_waterfallRate)
+                         .arg(m_waterfallAutoBlack ? 1 : 0)
+                         .arg(m_waterfallBlackLevel)
+                         .arg(m_waterfallColorGain));
+}
+
+void FlexControlServer::sendPanStatusToClients() const
+{
+    for (QTcpSocket* socket : m_clientHandles.keys()) {
+        sendPanStatus(socket);
+    }
 }
 
 void FlexControlServer::sendMeterStatus(QTcpSocket* socket) const
@@ -525,6 +787,131 @@ void FlexControlServer::sendDiscoveryPacket()
                                .arg(kRadioName, kModel, kSerial, kVersion, address)
                                .arg(m_port);
     m_discoverySocket.writeDatagram(packet.toUtf8(), QHostAddress::Broadcast, 4992);
+    // macOS does not always loop a broadcast packet back to local listeners.
+    m_discoverySocket.writeDatagram(packet.toUtf8(), QHostAddress::LocalHost, 4992);
+}
+
+void FlexControlServer::loadSettings()
+{
+    const QString directory = QDir::current().filePath(QStringLiteral("settings"));
+    QSettings settings(directory + QStringLiteral("/hiqsdr-flex6xxx.ini"),
+                       QSettings::IniFormat);
+    const double minimumDbm = settings.value(QStringLiteral("display/minimum_dbm"),
+                                             m_panMinimumDbm).toDouble();
+    const double maximumDbm = settings.value(QStringLiteral("display/maximum_dbm"),
+                                             m_panMaximumDbm).toDouble();
+    if (minimumDbm < maximumDbm) {
+        m_panMinimumDbm = minimumDbm;
+        m_panMaximumDbm = maximumDbm;
+    }
+    m_panRfGain = settings.value(QStringLiteral("display/rf_gain"), m_panRfGain).toInt();
+    m_panSpectrumPoints = qBound(128,
+        settings.value(QStringLiteral("display/spectrum_points"), m_panSpectrumPoints).toInt(),
+        8192);
+    m_radioBackend->setSpectrumPointCount(m_panSpectrumPoints);
+    m_spectrumFps = qBound(1, settings.value(QStringLiteral("display/fps"),
+                                               m_spectrumFps).toInt(), kMaximumSpectrumFps);
+    m_waterfallBlackLevel = settings.value(QStringLiteral("waterfall/black_level"),
+                                            m_waterfallBlackLevel).toInt();
+    m_waterfallColorGain = settings.value(QStringLiteral("waterfall/color_gain"),
+                                           m_waterfallColorGain).toInt();
+    m_waterfallAutoBlack = settings.value(QStringLiteral("waterfall/auto_black"),
+                                           m_waterfallAutoBlack).toBool();
+    m_waterfallRate = qBound(kMinimumWaterfallRate, kMaximumWaterfallRate,
+        settings.value(QStringLiteral("waterfall/rate"), m_waterfallRate).toInt());
+    m_networkMtu = qBound(kMinimumNetworkMtu, kMaximumNetworkMtu,
+        settings.value(QStringLiteral("network/mtu"), m_networkMtu).toInt());
+    m_radioBackend->setSliceFrequencyMhz(
+        settings.value(QStringLiteral("radio/slice_frequency_mhz"),
+                       m_radioBackend->sliceFrequencyMhz()).toDouble());
+    m_radioBackend->setPanCenterFrequencyMhz(
+        settings.value(QStringLiteral("radio/pan_center_frequency_mhz"),
+                       m_radioBackend->panCenterFrequencyMhz()).toDouble());
+    m_radioBackend->setPanBandwidthHz(
+        settings.value(QStringLiteral("radio/pan_bandwidth_hz"),
+                       m_radioBackend->panBandwidthHz()).toInt());
+    m_radioBackend->setFilter(
+        settings.value(QStringLiteral("radio/filter_low_hz"),
+                       m_radioBackend->filterLowHz()).toInt(),
+        settings.value(QStringLiteral("radio/filter_high_hz"),
+                       m_radioBackend->filterHighHz()).toInt());
+    m_radioBackend->setAntenna(settings.value(QStringLiteral("radio/antenna"),
+                                              m_radioBackend->antenna()).toString());
+    m_radioBackend->setPreampEnabled(settings.value(QStringLiteral("radio/preamp"),
+                                                     m_radioBackend->preampEnabled()).toBool());
+    m_radioBackend->setAttenuatorDb(settings.value(QStringLiteral("radio/attenuator_db"),
+                                                    m_radioBackend->attenuatorDb()).toInt());
+    m_radioBackend->setAudioLevel(settings.value(QStringLiteral("radio/audio_level"),
+                                                 m_radioBackend->audioLevel()).toInt());
+    m_radioBackend->setAudioMuted(settings.value(QStringLiteral("radio/audio_muted"),
+                                                 m_radioBackend->audioMuted()).toBool());
+    loadDisplayProfile();
+    qInfo() << "Loaded display range:" << m_panMinimumDbm << "to" << m_panMaximumDbm;
+}
+
+void FlexControlServer::loadDisplayProfile()
+{
+    const QString directory = QDir::current().filePath(QStringLiteral("settings"));
+    QSettings settings(directory + QStringLiteral("/hiqsdr-flex6xxx.ini"),
+                       QSettings::IniFormat);
+    const QString prefix = QStringLiteral("display_profiles/%1/")
+        .arg(m_radioBackend->spectrumSampleRateHz());
+    if (!settings.contains(prefix + QStringLiteral("minimum_dbm"))) {
+        return;
+    }
+
+    const double minimumDbm = settings.value(prefix + QStringLiteral("minimum_dbm")).toDouble();
+    const double maximumDbm = settings.value(prefix + QStringLiteral("maximum_dbm")).toDouble();
+    if (minimumDbm >= maximumDbm) {
+        qWarning() << "Ignoring invalid display profile for sample rate"
+                   << m_radioBackend->spectrumSampleRateHz();
+        return;
+    }
+
+    m_panMinimumDbm = minimumDbm;
+    m_panMaximumDbm = maximumDbm;
+    m_panRfGain = settings.value(prefix + QStringLiteral("rf_gain"), m_panRfGain).toInt();
+    m_radioBackend->setSpectrumDbmRange(
+        static_cast<float>(m_panMinimumDbm), static_cast<float>(m_panMaximumDbm));
+}
+
+void FlexControlServer::saveSettings() const
+{
+    const QString directory = QDir::current().filePath(QStringLiteral("settings"));
+    QDir().mkpath(directory);
+    QSettings settings(directory + QStringLiteral("/hiqsdr-flex6xxx.ini"),
+                       QSettings::IniFormat);
+    settings.setValue(QStringLiteral("display/minimum_dbm"), m_panMinimumDbm);
+    settings.setValue(QStringLiteral("display/maximum_dbm"), m_panMaximumDbm);
+    settings.setValue(QStringLiteral("display/rf_gain"), m_panRfGain);
+    settings.setValue(QStringLiteral("display/spectrum_points"), m_panSpectrumPoints);
+    settings.setValue(QStringLiteral("display/fps"), m_spectrumFps);
+    const QString profilePrefix = QStringLiteral("display_profiles/%1/")
+        .arg(m_radioBackend->spectrumSampleRateHz());
+    settings.setValue(profilePrefix + QStringLiteral("minimum_dbm"), m_panMinimumDbm);
+    settings.setValue(profilePrefix + QStringLiteral("maximum_dbm"), m_panMaximumDbm);
+    settings.setValue(profilePrefix + QStringLiteral("rf_gain"), m_panRfGain);
+    settings.setValue(QStringLiteral("waterfall/black_level"), m_waterfallBlackLevel);
+    settings.setValue(QStringLiteral("waterfall/color_gain"), m_waterfallColorGain);
+    settings.setValue(QStringLiteral("waterfall/auto_black"), m_waterfallAutoBlack);
+    settings.setValue(QStringLiteral("waterfall/rate"), m_waterfallRate);
+    settings.setValue(QStringLiteral("network/mtu"), m_networkMtu);
+    settings.setValue(QStringLiteral("radio/slice_frequency_mhz"),
+                      m_radioBackend->sliceFrequencyMhz());
+    settings.setValue(QStringLiteral("radio/pan_center_frequency_mhz"),
+                      m_radioBackend->panCenterFrequencyMhz());
+    settings.setValue(QStringLiteral("radio/pan_bandwidth_hz"),
+                      m_radioBackend->panBandwidthHz());
+    settings.setValue(QStringLiteral("radio/filter_low_hz"),
+                      m_radioBackend->filterLowHz());
+    settings.setValue(QStringLiteral("radio/filter_high_hz"),
+                      m_radioBackend->filterHighHz());
+    settings.setValue(QStringLiteral("radio/antenna"), m_radioBackend->antenna());
+    settings.setValue(QStringLiteral("radio/preamp"), m_radioBackend->preampEnabled());
+    settings.setValue(QStringLiteral("radio/attenuator_db"), m_radioBackend->attenuatorDb());
+    settings.setValue(QStringLiteral("radio/audio_level"), m_radioBackend->audioLevel());
+    settings.setValue(QStringLiteral("radio/audio_muted"), m_radioBackend->audioMuted());
+    settings.sync();
 }
 
 quint32 FlexControlServer::clientHandle(QTcpSocket* socket) const

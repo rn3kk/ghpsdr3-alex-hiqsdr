@@ -2,6 +2,7 @@
 #include <QCommandLineParser>
 #include <QHostAddress>
 
+#include "ApplicationLogger.h"
 #include "Flex8400Emulator.h"
 
 int main(int argc, char* argv[])
@@ -23,7 +24,13 @@ int main(int argc, char* argv[])
     parser.addOption({QStringLiteral("hiqsdr-ip"),
                       QStringLiteral("HiQSDR address. Enables hardware control without IQ streaming."),
                       QStringLiteral("address")});
+    parser.addOption({QStringLiteral("log-file"),
+                      QStringLiteral("Path to the application log file."),
+                      QStringLiteral("path"),
+                      QStringLiteral("logs/hiqsdr-flex6xxx.log")});
     parser.process(application);
+
+    ApplicationLogger::initialize(parser.value(QStringLiteral("log-file")));
 
     bool portIsValid = false;
     const quint16 port = parser.value(QStringLiteral("port")).toUShort(&portIsValid);
@@ -37,5 +44,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    return application.exec();
+    const int result = application.exec();
+    ApplicationLogger::shutdown();
+    return result;
 }

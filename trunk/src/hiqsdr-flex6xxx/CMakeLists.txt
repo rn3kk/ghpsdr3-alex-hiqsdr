@@ -12,6 +12,8 @@ qt_standard_project_setup()
 
 qt_add_executable(hiqsdr-flex6xxx
     src/main.cpp
+    src/ApplicationLogger.cpp
+    src/ApplicationLogger.h
     src/Flex8400Emulator.cpp
     src/Flex8400Emulator.h
     src/FlexControlServer.cpp
@@ -20,6 +22,10 @@ qt_add_executable(hiqsdr-flex6xxx
     src/HiqSdrBackend.h
     src/hiqsdr/HiqSdrDevice.cpp
     src/hiqsdr/HiqSdrDevice.h
+    src/hiqsdr/HiqSdrIqReceiver.cpp
+    src/hiqsdr/HiqSdrIqReceiver.h
+    src/hiqsdr/HiqSdrSpectrumProcessor.cpp
+    src/hiqsdr/HiqSdrSpectrumProcessor.h
     src/RadioBackend.cpp
     src/RadioBackend.h
     src/RadioTypes.h

@@ -16,6 +16,14 @@ public:
     virtual bool start() = 0;
     virtual bool setSliceFrequencyMhz(double frequencyMhz) = 0;
     virtual double sliceFrequencyMhz() const = 0;
+    virtual bool setPanCenterFrequencyMhz(double frequencyMhz) = 0;
+    virtual double panCenterFrequencyMhz() const = 0;
+    virtual bool setPanBandwidthHz(int bandwidthHz) = 0;
+    virtual int panBandwidthHz() const = 0;
+    virtual int spectrumSampleRateHz() const;
+    virtual bool setSpectrumPointCount(int pointCount);
+    virtual void setSpectrumFrameRate(int framesPerSecond);
+    virtual bool setSpectrumDbmRange(float minimumDbm, float maximumDbm);
     virtual bool setFilter(int lowHz, int highHz) = 0;
     virtual int filterLowHz() const = 0;
     virtual int filterHighHz() const = 0;
@@ -30,6 +38,8 @@ public:
     virtual void setAudioMuted(bool muted) = 0;
     virtual bool audioMuted() const = 0;
 
+    // Hardware backends can wait for a fresh FFT after retuning.
+    virtual bool hasSpectrumFrame() const;
     virtual SpectrumFrame createSpectrumFrame() = 0;
     virtual QVector<float> createUsbAudio(int frameCount) = 0;
     virtual float filterLevelDbm() const = 0;

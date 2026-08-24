@@ -13,6 +13,10 @@ public:
     bool start() override;
     bool setSliceFrequencyMhz(double frequencyMhz) override;
     double sliceFrequencyMhz() const override;
+    bool setPanCenterFrequencyMhz(double frequencyMhz) override;
+    double panCenterFrequencyMhz() const override;
+    bool setPanBandwidthHz(int bandwidthHz) override;
+    int panBandwidthHz() const override;
     bool setFilter(int lowHz, int highHz) override;
     int filterLowHz() const override;
     int filterHighHz() const override;
@@ -34,6 +38,8 @@ public:
 private:
     TestSignalProcessor m_signalProcessor;
     double m_sliceFrequencyMhz{14.100000};
+    double m_panCenterFrequencyMhz{14.100000};
+    int m_panBandwidthHz{200000};
     int m_filterLowHz{100};
     int m_filterHighHz{2900};
     QString m_antenna{QStringLiteral("ANT1")};
