@@ -16,6 +16,12 @@ public:
     virtual bool start() = 0;
     virtual bool setSliceFrequencyMhz(double frequencyMhz) = 0;
     virtual double sliceFrequencyMhz() const = 0;
+    virtual bool setSliceMode(const QString& mode) = 0;
+    virtual QString sliceMode() const = 0;
+    virtual bool setAgcMode(const QString& mode) = 0;
+    virtual QString agcMode() const = 0;
+    virtual bool setAgcThreshold(int threshold) = 0;
+    virtual int agcThreshold() const = 0;
     virtual bool setPanCenterFrequencyMhz(double frequencyMhz) = 0;
     virtual double panCenterFrequencyMhz() const = 0;
     virtual bool setPanBandwidthHz(int bandwidthHz) = 0;

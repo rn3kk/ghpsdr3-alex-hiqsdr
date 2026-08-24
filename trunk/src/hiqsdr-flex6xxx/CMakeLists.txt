@@ -20,12 +20,18 @@ qt_add_executable(hiqsdr-flex6xxx
     src/FlexControlServer.h
     src/HiqSdrBackend.cpp
     src/HiqSdrBackend.h
+    src/dsp/SsbDemodulator.cpp
+    src/dsp/SsbDemodulator.h
+    src/dsp/AudioDspWorker.cpp
+    src/dsp/AudioDspWorker.h
     src/hiqsdr/HiqSdrDevice.cpp
     src/hiqsdr/HiqSdrDevice.h
     src/hiqsdr/HiqSdrIqReceiver.cpp
     src/hiqsdr/HiqSdrIqReceiver.h
     src/hiqsdr/HiqSdrSpectrumProcessor.cpp
     src/hiqsdr/HiqSdrSpectrumProcessor.h
+    src/hiqsdr/SpectrumDspWorker.cpp
+    src/hiqsdr/SpectrumDspWorker.h
     src/RadioBackend.cpp
     src/RadioBackend.h
     src/RadioTypes.h

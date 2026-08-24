@@ -4,7 +4,9 @@
 
 #include "hiqsdr/HiqSdrDevice.h"
 #include "hiqsdr/HiqSdrIqReceiver.h"
-#include "hiqsdr/HiqSdrSpectrumProcessor.h"
+#include "dsp/AudioDspWorker.h"
+#include "dsp/SsbDemodulator.h"
+#include "hiqsdr/SpectrumDspWorker.h"
 
 namespace {
 constexpr int kMaximumPanBandwidthHz = 960000;
@@ -14,12 +16,30 @@ HiqSdrBackend::HiqSdrBackend(const QString& deviceAddress, QObject* parent)
     : RadioBackend(parent),
       m_device(new HiqSdrDevice(deviceAddress, this)),
       m_iqReceiver(new HiqSdrIqReceiver(deviceAddress, this)),
-      m_spectrumProcessor(std::make_unique<HiqSdrSpectrumProcessor>()),
+      m_spectrumDspWorker(new SpectrumDspWorker()),
+      m_audioDspWorker(new AudioDspWorker()),
       m_deviceAddress(deviceAddress)
 {
-    m_spectrumProcessor->setSampleRate(m_sampleRate);
-    m_spectrumProcessor->setPanBandwidthHz(m_panBandwidthHz);
-    m_spectrumProcessor->setCenterFrequencyHz(qRound64(m_panCenterFrequencyMhz * 1000000.0));
+    m_spectrumDspWorker->setSampleRate(m_sampleRate);
+    m_spectrumDspWorker->setPanBandwidthHz(m_panBandwidthHz);
+    m_spectrumDspWorker->setCenterFrequencyHz(
+        qRound64(m_panCenterFrequencyMhz * 1000000.0));
+    m_spectrumDspWorker->moveToThread(&m_spectrumDspThread);
+    connect(&m_spectrumDspThread, &QThread::started,
+            m_spectrumDspWorker, &SpectrumDspWorker::start);
+    connect(&m_spectrumDspThread, &QThread::finished,
+            m_spectrumDspWorker, &QObject::deleteLater);
+    m_spectrumDspThread.start();
+    m_audioDspWorker->setInputSampleRate(m_sampleRate);
+    m_audioDspWorker->setFilter(m_filterLowHz, m_filterHighHz);
+    m_audioDspWorker->setAgcMode(m_agcMode);
+    m_audioDspWorker->setAgcThreshold(m_agcThreshold);
+    m_audioDspWorker->moveToThread(&m_audioDspThread);
+    connect(&m_audioDspThread, &QThread::started,
+            m_audioDspWorker, &AudioDspWorker::start);
+    connect(&m_audioDspThread, &QThread::finished,
+            m_audioDspWorker, &QObject::deleteLater);
+    m_audioDspThread.start();
     connect(m_iqReceiver, &HiqSdrIqReceiver::iqDatagramReceived,
             this, &HiqSdrBackend::onIqDatagramReceived);
 }
@@ -30,6 +50,10 @@ HiqSdrBackend::~HiqSdrBackend()
         m_iqReceiver->stop();
         m_device->close();
     }
+    m_audioDspThread.quit();
+    m_audioDspThread.wait();
+    m_spectrumDspThread.quit();
+    m_spectrumDspThread.wait();
 }
 
 bool HiqSdrBackend::start()
@@ -53,12 +77,63 @@ bool HiqSdrBackend::setSliceFrequencyMhz(double frequencyMhz)
         return false;
     }
     m_sliceFrequencyMhz = frequencyMhz;
+    m_audioDspWorker->setFrequencyOffsetHz(
+        (m_sliceFrequencyMhz - m_panCenterFrequencyMhz) * 1000000.0);
     return true;
 }
 
 double HiqSdrBackend::sliceFrequencyMhz() const
 {
     return m_sliceFrequencyMhz;
+}
+
+bool HiqSdrBackend::setSliceMode(const QString& mode)
+{
+    if (mode == QStringLiteral("USB")) {
+        m_audioDspWorker->setSideband(SsbDemodulator::Sideband::Usb);
+    } else if (mode == QStringLiteral("LSB")) {
+        m_audioDspWorker->setSideband(SsbDemodulator::Sideband::Lsb);
+    } else {
+        return false;
+    }
+    m_sliceMode = mode;
+    return true;
+}
+
+QString HiqSdrBackend::sliceMode() const
+{
+    return m_sliceMode;
+}
+
+bool HiqSdrBackend::setAgcMode(const QString& mode)
+{
+    if (mode != QStringLiteral("OFF") && mode != QStringLiteral("FAST")
+        && mode != QStringLiteral("MED") && mode != QStringLiteral("SLOW")) {
+        return false;
+    }
+    m_agcMode = mode;
+    m_audioDspWorker->setAgcMode(m_agcMode);
+    return true;
+}
+
+QString HiqSdrBackend::agcMode() const
+{
+    return m_agcMode;
+}
+
+bool HiqSdrBackend::setAgcThreshold(int threshold)
+{
+    if (threshold < 0 || threshold > 100) {
+        return false;
+    }
+    m_agcThreshold = threshold;
+    m_audioDspWorker->setAgcThreshold(m_agcThreshold);
+    return true;
+}
+
+int HiqSdrBackend::agcThreshold() const
+{
+    return m_agcThreshold;
 }
 
 bool HiqSdrBackend::setPanCenterFrequencyMhz(double frequencyMhz)
@@ -68,7 +143,9 @@ bool HiqSdrBackend::setPanCenterFrequencyMhz(double frequencyMhz)
     }
     if (!m_started) {
         m_panCenterFrequencyMhz = frequencyMhz;
-        m_spectrumProcessor->setCenterFrequencyHz(qRound64(frequencyMhz * 1000000.0));
+        m_spectrumDspWorker->setCenterFrequencyHz(qRound64(frequencyMhz * 1000000.0));
+        m_audioDspWorker->setFrequencyOffsetHz(
+            (m_sliceFrequencyMhz - m_panCenterFrequencyMhz) * 1000000.0);
         return true;
     }
     if (!m_device->setFrequency(qRound64(frequencyMhz * 1000000.0))) {
@@ -78,7 +155,9 @@ bool HiqSdrBackend::setPanCenterFrequencyMhz(double frequencyMhz)
         return false;
     }
     m_panCenterFrequencyMhz = frequencyMhz;
-    m_spectrumProcessor->setCenterFrequencyHz(qRound64(frequencyMhz * 1000000.0));
+    m_spectrumDspWorker->setCenterFrequencyHz(qRound64(frequencyMhz * 1000000.0));
+    m_audioDspWorker->setFrequencyOffsetHz(
+        (m_sliceFrequencyMhz - m_panCenterFrequencyMhz) * 1000000.0);
     return true;
 }
 
@@ -100,7 +179,7 @@ bool HiqSdrBackend::setPanBandwidthHz(int bandwidthHz)
     }
     if (sampleRate == m_sampleRate) {
         m_panBandwidthHz = bandwidthHz;
-        m_spectrumProcessor->setPanBandwidthHz(m_panBandwidthHz);
+        m_spectrumDspWorker->setPanBandwidthHz(m_panBandwidthHz);
         return true;
     }
 
@@ -119,8 +198,9 @@ bool HiqSdrBackend::setPanBandwidthHz(int bandwidthHz)
     }
     m_sampleRate = sampleRate;
     m_panBandwidthHz = bandwidthHz;
-    m_spectrumProcessor->setSampleRate(m_sampleRate);
-    m_spectrumProcessor->setPanBandwidthHz(m_panBandwidthHz);
+    m_spectrumDspWorker->setSampleRate(m_sampleRate);
+    m_spectrumDspWorker->setPanBandwidthHz(m_panBandwidthHz);
+    m_audioDspWorker->setInputSampleRate(m_sampleRate);
     qInfo() << "HiQSDR pan bandwidth:" << bandwidthHz
             << "sample rate:" << m_sampleRate;
     return true;
@@ -138,13 +218,13 @@ int HiqSdrBackend::spectrumSampleRateHz() const
 
 bool HiqSdrBackend::setSpectrumPointCount(int pointCount)
 {
-    m_spectrumProcessor->setOutputPointCount(pointCount);
+    m_spectrumDspWorker->setOutputPointCount(pointCount);
     return true;
 }
 
 void HiqSdrBackend::setSpectrumFrameRate(int framesPerSecond)
 {
-    m_spectrumProcessor->setFrameRate(framesPerSecond);
+    m_spectrumDspWorker->setFrameRate(framesPerSecond);
 }
 
 bool HiqSdrBackend::setSpectrumDbmRange(float minimumDbm, float maximumDbm)
@@ -152,7 +232,7 @@ bool HiqSdrBackend::setSpectrumDbmRange(float minimumDbm, float maximumDbm)
     if (minimumDbm >= maximumDbm) {
         return false;
     }
-    m_spectrumProcessor->setDbmRange(minimumDbm, maximumDbm);
+    m_spectrumDspWorker->setDbmRange(minimumDbm, maximumDbm);
     return true;
 }
 
@@ -164,6 +244,7 @@ bool HiqSdrBackend::setFilter(int lowHz, int highHz)
     // HiQSDR bandwidth is its IQ sample rate, not the receiver audio filter.
     m_filterLowHz = lowHz;
     m_filterHighHz = highHz;
+    m_audioDspWorker->setFilter(m_filterLowHz, m_filterHighHz);
     return true;
 }
 
@@ -269,17 +350,25 @@ bool HiqSdrBackend::audioMuted() const
 
 bool HiqSdrBackend::hasSpectrumFrame() const
 {
-    return m_spectrumProcessor->hasSpectrumFrame();
+    return m_spectrumDspWorker->hasSpectrumFrame();
 }
 
 SpectrumFrame HiqSdrBackend::createSpectrumFrame()
 {
-    return m_spectrumProcessor->createSpectrumFrame();
+    return m_spectrumDspWorker->createSpectrumFrame();
 }
 
 QVector<float> HiqSdrBackend::createUsbAudio(int frameCount)
 {
-    return QVector<float>(frameCount, 0.0f);
+    QVector<float> audio;
+    if (!m_audioDspWorker->takeAudio(frameCount, &audio)) {
+        return audio;
+    }
+    const float gain = m_audioMuted ? 0.0f : static_cast<float>(m_audioLevel) / 100.0f;
+    for (float& sample : audio) {
+        sample *= gain;
+    }
+    return audio;
 }
 
 float HiqSdrBackend::filterLevelDbm() const
@@ -293,7 +382,8 @@ void HiqSdrBackend::onIqDatagramReceived(const QByteArray& datagram)
     if (m_iqDatagramsReceived == 1) {
         qInfo() << "HiQSDR IQ stream is receiving 1442-byte datagrams";
     }
-    m_spectrumProcessor->addIqDatagram(datagram);
+    m_audioDspWorker->enqueueIqDatagram(datagram);
+    m_spectrumDspWorker->enqueueIqDatagram(datagram);
 }
 
 bool HiqSdrBackend::sendInitialControlState()

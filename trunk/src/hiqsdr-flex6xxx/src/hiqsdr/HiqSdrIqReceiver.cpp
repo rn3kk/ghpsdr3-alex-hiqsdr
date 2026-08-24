@@ -8,7 +8,6 @@
 namespace {
 constexpr quint16 kIqPort = 48247;
 constexpr int kIqDatagramSize = 1442;
-constexpr int kMaximumDatagramsPerEvent = 8;
 constexpr quint8 kStartStreamCommand = 0x72;
 constexpr quint8 kStopStreamCommand = 0x73;
 }
@@ -72,9 +71,7 @@ bool HiqSdrIqReceiver::isRunning() const
 
 void HiqSdrIqReceiver::onReadyRead()
 {
-    int datagramsProcessed = 0;
-    while (m_socket->hasPendingDatagrams()
-           && datagramsProcessed < kMaximumDatagramsPerEvent) {
+    while (m_socket->hasPendingDatagrams()) {
         const qint64 size = m_socket->pendingDatagramSize();
         QByteArray datagram;
         datagram.resize(static_cast<int>(size));
@@ -90,7 +87,6 @@ void HiqSdrIqReceiver::onReadyRead()
             continue;
         }
         emit iqDatagramReceived(datagram);
-        ++datagramsProcessed;
     }
 }
 

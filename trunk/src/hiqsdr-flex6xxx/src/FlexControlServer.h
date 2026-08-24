@@ -38,6 +38,7 @@ private slots:
     void onClientDisconnected();
     void onDiscoveryTimeout();
     void onPanUpdateTimeout();
+    void onSettingsSaveTimeout();
 
 private:
     void processCommand(QTcpSocket* socket, const QString& line);
@@ -65,6 +66,7 @@ private:
     void sendDiscoveryPacket();
     void loadSettings();
     void loadDisplayProfile();
+    void scheduleSettingsSave();
     void saveSettings() const;
     quint32 clientHandle(QTcpSocket* socket) const;
 
@@ -73,6 +75,7 @@ private:
     QUdpSocket m_discoverySocket;
     QTimer* m_discoveryTimer;
     QTimer* m_panUpdateTimer;
+    QTimer* m_settingsSaveTimer;
     QMap<QTcpSocket*, QByteArray> m_readBuffers;
     QMap<QTcpSocket*, quint32> m_clientHandles;
     QMap<QTcpSocket*, quint16> m_clientUdpPorts;

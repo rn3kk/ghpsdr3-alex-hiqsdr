@@ -16,6 +16,7 @@ const QString kRadioName = QStringLiteral("HiQSDR Flex Gateway");
 constexpr quint32 kInvalidArgumentError = 0x50000002;
 constexpr quint32 kUnsupportedCommandError = 0x50000015;
 constexpr int kPanUpdateDelayMs = 150;
+constexpr int kSettingsSaveDelayMs = 750;
 constexpr int kMaximumSpectrumFps = 25;
 constexpr int kMinimumWaterfallRate = 1;
 constexpr int kMaximumWaterfallRate = 100;
@@ -27,16 +28,20 @@ FlexControlServer::FlexControlServer(RadioBackend* radioBackend, QObject* parent
     : QObject(parent),
       m_radioBackend(radioBackend),
       m_discoveryTimer(new QTimer(this)),
-      m_panUpdateTimer(new QTimer(this))
+      m_panUpdateTimer(new QTimer(this)),
+      m_settingsSaveTimer(new QTimer(this))
 {
     m_discoveryTimer->setInterval(1000);
     m_panUpdateTimer->setSingleShot(true);
+    m_settingsSaveTimer->setSingleShot(true);
     connect(&m_server, &QTcpServer::newConnection,
             this, &FlexControlServer::onNewConnection);
     connect(m_discoveryTimer, &QTimer::timeout,
             this, &FlexControlServer::onDiscoveryTimeout);
     connect(m_panUpdateTimer, &QTimer::timeout,
             this, &FlexControlServer::onPanUpdateTimeout);
+    connect(m_settingsSaveTimer, &QTimer::timeout,
+            this, &FlexControlServer::onSettingsSaveTimeout);
     loadSettings();
     // Keep IQ processing independent from the spectrum display slider.
     m_radioBackend->setSpectrumFrameRate(kMaximumSpectrumFps);
@@ -44,7 +49,7 @@ FlexControlServer::FlexControlServer(RadioBackend* radioBackend, QObject* parent
             static_cast<float>(m_panMinimumDbm), static_cast<float>(m_panMaximumDbm))) {
         qWarning() << "Cannot apply saved display range";
     }
-    saveSettings();
+    scheduleSettingsSave();
 }
 
 bool FlexControlServer::start(const QHostAddress& address, quint16 port)
@@ -166,8 +171,13 @@ void FlexControlServer::onPanUpdateTimeout()
     }
 
     loadDisplayProfile();
-    saveSettings();
+    scheduleSettingsSave();
     sendPanStatusToClients();
+}
+
+void FlexControlServer::onSettingsSaveTimeout()
+{
+    saveSettings();
 }
 
 void FlexControlServer::processCommand(QTcpSocket* socket, const QString& line)
@@ -252,7 +262,7 @@ bool FlexControlServer::processSliceTune(QTcpSocket* socket, quint32 sequence,
         sendResponse(socket, sequence, kInvalidArgumentError, QStringLiteral("Invalid frequency"));
         return true;
     }
-    saveSettings();
+    scheduleSettingsSave();
     sendSliceStatus(socket);
     sendResponse(socket, sequence, 0);
     return true;
@@ -276,6 +286,13 @@ bool FlexControlServer::processSliceSet(QTcpSocket* socket, quint32 sequence,
     bool updated = false;
     if (name == QStringLiteral("RF_frequency")) {
         updated = m_radioBackend->setSliceFrequencyMhz(value.toDouble(&valueIsValid));
+        updated = updated && valueIsValid;
+    } else if (name == QStringLiteral("mode")) {
+        updated = m_radioBackend->setSliceMode(value.toUpper());
+    } else if (name == QStringLiteral("agc_mode")) {
+        updated = m_radioBackend->setAgcMode(value.toUpper());
+    } else if (name == QStringLiteral("agc_threshold")) {
+        updated = m_radioBackend->setAgcThreshold(value.toInt(&valueIsValid));
         updated = updated && valueIsValid;
     } else if (name == QStringLiteral("rxant")) {
         updated = m_radioBackend->setAntenna(value);
@@ -312,7 +329,7 @@ bool FlexControlServer::processSliceSet(QTcpSocket* socket, quint32 sequence,
         sendResponse(socket, sequence, kInvalidArgumentError, QStringLiteral("Invalid slice setting"));
         return true;
     }
-    saveSettings();
+    scheduleSettingsSave();
     sendSliceStatus(socket);
     sendResponse(socket, sequence, 0);
     return true;
@@ -337,7 +354,7 @@ bool FlexControlServer::processFilter(QTcpSocket* socket, quint32 sequence,
         sendResponse(socket, sequence, kInvalidArgumentError, QStringLiteral("Invalid filter"));
         return true;
     }
-    saveSettings();
+    scheduleSettingsSave();
     sendSliceStatus(socket);
     sendResponse(socket, sequence, 0);
     return true;
@@ -366,7 +383,7 @@ bool FlexControlServer::processClientCommand(QTcpSocket* socket, quint32 sequenc
             if (m_networkMtu != boundedMtu) {
                 m_networkMtu = boundedMtu;
                 emit networkMtuChanged(m_networkMtu);
-                saveSettings();
+                scheduleSettingsSave();
             }
             sendResponse(socket, sequence, 0, QString::number(m_networkMtu));
             return true;
@@ -599,7 +616,7 @@ bool FlexControlServer::processDisplayCommand(QTcpSocket* socket, quint32 sequen
             m_panUpdatePending = true;
             m_panUpdateTimer->start(kPanUpdateDelayMs);
         }
-        saveSettings();
+        scheduleSettingsSave();
         if (!panViewChanged) {
             sendPanStatus(socket);
         }
@@ -638,7 +655,7 @@ bool FlexControlServer::processDisplayCommand(QTcpSocket* socket, quint32 sequen
             m_waterfallRate = waterfallRate;
             emit waterfallRateChanged(m_waterfallRate);
         }
-        saveSettings();
+        scheduleSettingsSave();
         sendPanStatus(socket);
         sendResponse(socket, sequence, 0);
         return true;
@@ -711,11 +728,13 @@ void FlexControlServer::sendSliceStatus(QTcpSocket* socket) const
 {
     const QString handleText = QString::number(clientHandle(socket), 16).toUpper();
     sendLine(socket, QStringLiteral("S%1|slice 0 client_handle=0x%1 pan=0x40000000 "
-                                    "RF_frequency=%2 mode=USB filter_lo=%3 filter_hi=%4 "
-                                    "rxant=%5 preamp=%6 attenuator=%7 audio_level=%8 "
-                                    "audio_mute=%9 tx=%10 tx_client_handle=0x%1 in_use=1 active=1")
+                                    "RF_frequency=%2 mode=%3 filter_lo=%4 filter_hi=%5 "
+                                    "rxant=%6 preamp=%7 attenuator=%8 audio_level=%9 "
+                                    "audio_mute=%10 agc_mode=%11 agc_threshold=%12 tx=%13 "
+                                    "tx_client_handle=0x%1 in_use=1 active=1")
                          .arg(handleText)
                          .arg(m_radioBackend->sliceFrequencyMhz(), 0, 'f', 6)
+                         .arg(m_radioBackend->sliceMode())
                          .arg(m_radioBackend->filterLowHz())
                          .arg(m_radioBackend->filterHighHz())
                          .arg(m_radioBackend->antenna())
@@ -723,6 +742,8 @@ void FlexControlServer::sendSliceStatus(QTcpSocket* socket) const
                          .arg(m_radioBackend->attenuatorDb())
                          .arg(m_radioBackend->audioLevel())
                          .arg(m_radioBackend->audioMuted() ? 1 : 0)
+                         .arg(m_radioBackend->agcMode())
+                         .arg(m_radioBackend->agcThreshold())
                          .arg(m_txAssigned ? 1 : 0));
 }
 
@@ -824,6 +845,12 @@ void FlexControlServer::loadSettings()
     m_radioBackend->setSliceFrequencyMhz(
         settings.value(QStringLiteral("radio/slice_frequency_mhz"),
                        m_radioBackend->sliceFrequencyMhz()).toDouble());
+    m_radioBackend->setSliceMode(settings.value(QStringLiteral("radio/slice_mode"),
+                                                m_radioBackend->sliceMode()).toString());
+    m_radioBackend->setAgcMode(settings.value(QStringLiteral("radio/agc_mode"),
+                                              m_radioBackend->agcMode()).toString());
+    m_radioBackend->setAgcThreshold(settings.value(QStringLiteral("radio/agc_threshold"),
+                                                   m_radioBackend->agcThreshold()).toInt());
     m_radioBackend->setPanCenterFrequencyMhz(
         settings.value(QStringLiteral("radio/pan_center_frequency_mhz"),
                        m_radioBackend->panCenterFrequencyMhz()).toDouble());
@@ -898,6 +925,9 @@ void FlexControlServer::saveSettings() const
     settings.setValue(QStringLiteral("network/mtu"), m_networkMtu);
     settings.setValue(QStringLiteral("radio/slice_frequency_mhz"),
                       m_radioBackend->sliceFrequencyMhz());
+    settings.setValue(QStringLiteral("radio/slice_mode"), m_radioBackend->sliceMode());
+    settings.setValue(QStringLiteral("radio/agc_mode"), m_radioBackend->agcMode());
+    settings.setValue(QStringLiteral("radio/agc_threshold"), m_radioBackend->agcThreshold());
     settings.setValue(QStringLiteral("radio/pan_center_frequency_mhz"),
                       m_radioBackend->panCenterFrequencyMhz());
     settings.setValue(QStringLiteral("radio/pan_bandwidth_hz"),
@@ -912,6 +942,11 @@ void FlexControlServer::saveSettings() const
     settings.setValue(QStringLiteral("radio/audio_level"), m_radioBackend->audioLevel());
     settings.setValue(QStringLiteral("radio/audio_muted"), m_radioBackend->audioMuted());
     settings.sync();
+}
+
+void FlexControlServer::scheduleSettingsSave()
+{
+    m_settingsSaveTimer->start(kSettingsSaveDelayMs);
 }
 
 quint32 FlexControlServer::clientHandle(QTcpSocket* socket) const

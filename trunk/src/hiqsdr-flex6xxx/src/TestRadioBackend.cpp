@@ -24,6 +24,49 @@ double TestRadioBackend::sliceFrequencyMhz() const
     return m_sliceFrequencyMhz;
 }
 
+bool TestRadioBackend::setSliceMode(const QString& mode)
+{
+    if (mode != QStringLiteral("USB") && mode != QStringLiteral("LSB")) {
+        return false;
+    }
+    m_sliceMode = mode;
+    return true;
+}
+
+QString TestRadioBackend::sliceMode() const
+{
+    return m_sliceMode;
+}
+
+bool TestRadioBackend::setAgcMode(const QString& mode)
+{
+    if (mode != QStringLiteral("OFF") && mode != QStringLiteral("FAST")
+        && mode != QStringLiteral("MED") && mode != QStringLiteral("SLOW")) {
+        return false;
+    }
+    m_agcMode = mode;
+    return true;
+}
+
+QString TestRadioBackend::agcMode() const
+{
+    return m_agcMode;
+}
+
+bool TestRadioBackend::setAgcThreshold(int threshold)
+{
+    if (threshold < 0 || threshold > 100) {
+        return false;
+    }
+    m_agcThreshold = threshold;
+    return true;
+}
+
+int TestRadioBackend::agcThreshold() const
+{
+    return m_agcThreshold;
+}
+
 bool TestRadioBackend::setPanCenterFrequencyMhz(double frequencyMhz)
 {
     if (frequencyMhz <= 0.0) {

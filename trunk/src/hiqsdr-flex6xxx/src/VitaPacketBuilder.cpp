@@ -116,24 +116,33 @@ QList<QByteArray> VitaPacketBuilder::createWaterfallPackets(const SpectrumFrame&
     return packets;
 }
 
-QByteArray VitaPacketBuilder::createAudioPacket(const QVector<float>& monoAudio)
+QList<QByteArray> VitaPacketBuilder::createAudioPackets(const QVector<float>& monoAudio)
 {
     constexpr int headerBytes = 28;
-    const int packetBytes = headerBytes + monoAudio.size() * 2 * sizeof(float);
-    QByteArray packet(packetBytes, Qt::Uninitialized);
-    uchar* data = reinterpret_cast<uchar*>(packet.data());
-    writeHeader(data, packetWord(m_audioSequence, packetBytes / 4),
-                kAudioStreamId, kNarrowAudioClass);
+    constexpr int bytesPerStereoSample = 2 * sizeof(float);
+    const int samplesPerPacket = qMax(1, (m_networkMtu - kIpv4AndUdpHeaderBytes
+                                          - headerBytes) / bytesPerStereoSample);
+    QList<QByteArray> packets;
 
-    for (int index = 0; index < monoAudio.size(); ++index) {
-        quint32 bits = 0;
-        std::memcpy(&bits, &monoAudio.at(index), sizeof(bits));
-        qToBigEndian(bits, data + headerBytes + index * 2 * sizeof(float));
-        qToBigEndian(bits, data + headerBytes + (index * 2 + 1) * sizeof(float));
+    for (int firstSample = 0; firstSample < monoAudio.size(); firstSample += samplesPerPacket) {
+        const int sampleCount = qMin(samplesPerPacket, monoAudio.size() - firstSample);
+        const int packetBytes = headerBytes + sampleCount * bytesPerStereoSample;
+        QByteArray packet(packetBytes, Qt::Uninitialized);
+        uchar* data = reinterpret_cast<uchar*>(packet.data());
+        writeHeader(data, packetWord(m_audioSequence, packetBytes / 4),
+                    kAudioStreamId, kNarrowAudioClass);
+
+        for (int index = 0; index < sampleCount; ++index) {
+            quint32 bits = 0;
+            std::memcpy(&bits, &monoAudio.at(firstSample + index), sizeof(bits));
+            qToBigEndian(bits, data + headerBytes + index * bytesPerStereoSample);
+            qToBigEndian(bits, data + headerBytes + (index * 2 + 1) * sizeof(float));
+        }
+
+        packets.append(packet);
+        m_audioSequence = (m_audioSequence + 1) & 0x0F;
     }
-
-    m_audioSequence = (m_audioSequence + 1) & 0x0F;
-    return packet;
+    return packets;
 }
 
 QByteArray VitaPacketBuilder::createMeterPacket(float levelDbm)

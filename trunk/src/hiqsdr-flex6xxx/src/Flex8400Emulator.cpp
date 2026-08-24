@@ -157,7 +157,10 @@ void Flex8400Emulator::onAudioTimeout()
     }
 
     const QVector<float> audio = m_radioBackend->createUsbAudio(kAudioFramesPerPacket);
-    m_udpStreamer->send(m_packetBuilder.createAudioPacket(audio), endpoints);
+    if (audio.size() != kAudioFramesPerPacket) {
+        return;
+    }
+    m_udpStreamer->send(m_packetBuilder.createAudioPackets(audio), endpoints);
 }
 
 void Flex8400Emulator::onSpectrumFpsChanged(int framesPerSecond)

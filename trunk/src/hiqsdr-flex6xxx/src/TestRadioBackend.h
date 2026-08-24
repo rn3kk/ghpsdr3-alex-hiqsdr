@@ -13,6 +13,12 @@ public:
     bool start() override;
     bool setSliceFrequencyMhz(double frequencyMhz) override;
     double sliceFrequencyMhz() const override;
+    bool setSliceMode(const QString& mode) override;
+    QString sliceMode() const override;
+    bool setAgcMode(const QString& mode) override;
+    QString agcMode() const override;
+    bool setAgcThreshold(int threshold) override;
+    int agcThreshold() const override;
     bool setPanCenterFrequencyMhz(double frequencyMhz) override;
     double panCenterFrequencyMhz() const override;
     bool setPanBandwidthHz(int bandwidthHz) override;
@@ -38,6 +44,9 @@ public:
 private:
     TestSignalProcessor m_signalProcessor;
     double m_sliceFrequencyMhz{14.100000};
+    QString m_sliceMode{QStringLiteral("USB")};
+    QString m_agcMode{QStringLiteral("MED")};
+    int m_agcThreshold{50};
     double m_panCenterFrequencyMhz{14.100000};
     int m_panBandwidthHz{200000};
     int m_filterLowHz{100};

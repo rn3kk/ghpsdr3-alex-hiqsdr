@@ -12,7 +12,7 @@ public:
     void setNetworkMtu(int mtu);
     QList<QByteArray> createSpectrumPackets(const SpectrumFrame& frame);
     QList<QByteArray> createWaterfallPackets(const SpectrumFrame& frame);
-    QByteArray createAudioPacket(const QVector<float>& monoAudio);
+    QList<QByteArray> createAudioPackets(const QVector<float>& monoAudio);
     QByteArray createMeterPacket(float levelDbm);
 
 private:
